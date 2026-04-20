@@ -1,0 +1,626 @@
+/* ----------------------------------
+   Main Page
+---------------------------------- */
+
+.users-page {
+  padding: 16px 34px;
+  max-width: 1400px;
+  margin: 0 auto;
+  font-family: Arial, sans-serif;
+}
+
+.users-page h2 {
+  margin-bottom: 16px;
+}
+
+.users-toolbar {
+  margin-bottom: 12px;
+}
+
+.search-bar {
+  width: 300px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.users-actions {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.users-actions .primary {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.users-actions .primary:hover {
+  background-color: #0069d9;
+}
+
+/* ----------------------------------
+   Table
+---------------------------------- */
+
+.users-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-bottom: 20px;
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.users-table th {
+  text-align: left;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.users-table th,
+.users-table td {
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #e5e7eb;
+  border-left: none;
+  border-right: none;
+}
+
+.users-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.users-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.actions button {
+  margin-right: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.users-page td.actions {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.users-page td.actions button {
+  margin-right: 0;
+}
+
+.users-col-center {
+  text-align: center !important;
+}
+
+.users-companies-cell {
+  white-space: normal;
+}
+
+.users-company-line {
+  display: block;
+  line-height: 1.3;
+}
+
+/* ----------------------------------
+   Modal Overlay
+---------------------------------- */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: #fff;
+  border-radius: 8px;
+  width: 800px;
+  max-width: 90%;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.modal.modern {
+  font-family: Arial, sans-serif;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.icon-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+/* ----------------------------------
+   Detail Grid (Form)
+---------------------------------- */
+
+.details-grid {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  row-gap: 12px;
+  column-gap: 12px;
+  align-items: center;
+}
+
+.detail-row {
+  display: contents;
+}
+
+.detail-label {
+  font-weight: bold;
+  color: #1d4ed8;
+}
+
+.user-modal .detail-label {
+  color: #1d4ed8;
+  font-weight: 700;
+  font-size: 1rem;
+  text-transform: none;
+}
+
+.detail-value input,
+.detail-value select {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-size: 14px;
+}
+
+.detail-value input[type="checkbox"] {
+  width: auto;
+  margin-right: 6px;
+}
+
+/* ----------------------------------
+   Nested Rows (Companies, Phones, Addresses)
+---------------------------------- */
+
+.nested-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.nested-row .icon-button {
+  margin-left: 6px;
+  cursor: pointer;
+  color: #d9534f;
+}
+
+.nested-row input,
+.nested-row select {
+  margin-right: 6px;
+}
+
+/* ----------------------------------
+   Status Pills
+---------------------------------- */
+
+.status-pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: white;
+  font-weight: bold;
+}
+
+.status-pill.active {
+  background-color: #28a745;
+}
+
+.status-pill.inactive {
+  background-color: #dc3545;
+}
+
+/* ----------------------------------
+   Modal Actions
+---------------------------------- */
+
+.modal-actions {
+  margin-top: 20px;
+  text-align: right;
+}
+
+.modal-actions button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+}
+
+.modal-actions .primary {
+  background-color: #007bff;
+  color: white;
+  font-weight: bold;
+  margin-left: 8px;
+}
+
+.modal-actions .primary:hover {
+  background-color: #0069d9;
+}
+
+.user-profile-modal .modal-actions .primary {
+  font-weight: 400;
+}
+
+.user-addresses-section {
+  margin-top: 18px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 14px;
+}
+
+.user-addresses-header {
+  font-weight: 700;
+  color: #1d4ed8;
+  margin-bottom: 10px;
+}
+
+.user-addresses-empty {
+  margin: 0 0 10px 0;
+  color: #6b7280;
+}
+
+.user-addresses-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.user-address-card {
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.user-address-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.user-address-card-body p {
+  margin: 2px 0;
+  font-size: 0.9rem;
+}
+
+.user-address-card-body p span {
+  font-weight: 600;
+  color: #334155;
+}
+
+.user-address-add-btn {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.modal.user-profile-modal {
+  width: min(800px, calc(100vw - 36px)) !important;
+  max-width: min(800px, calc(100vw - 36px)) !important;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: 1px solid #9ca3af;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+.user-profile-layout {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 18px;
+}
+
+.user-profile-left {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.user-profile-identity-card,
+.user-profile-fields-card,
+.user-data-card {
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #f9fafb;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.user-profile-identity-card {
+  padding: 18px 16px;
+  text-align: center;
+}
+
+.user-profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  margin: 0 auto 10px auto;
+  background: linear-gradient(145deg, #cbd5e1, #94a3b8);
+  color: #0f172a;
+  font-size: 2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-profile-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.user-profile-meta {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.user-profile-meta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-profile-meta-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.user-profile-meta-value {
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.user-profile-meta-value-indented {
+  display: inline-block;
+  padding-left: 12px;
+}
+
+.user-type-edit-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  margin-left: -6px;
+}
+
+.user-type-edit-button {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #1d4ed8;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.user-type-edit-button:hover {
+  background: #eff6ff;
+}
+
+.user-profile-meta-value select {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+}
+
+.user-profile-fields-card {
+  padding: 12px 14px;
+}
+
+.user-profile-field-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.user-profile-field-row:last-child {
+  border-bottom: none;
+}
+
+.user-profile-field-label {
+  color: #334155;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.user-profile-field-value {
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.user-profile-field-value input,
+.user-profile-field-value select {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+}
+
+.user-reset-password-btn {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.user-reset-password-btn:hover {
+  background: #1d4ed8;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-profile-right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.user-data-card {
+  padding: 0;
+}
+
+.user-data-card-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  font-weight: 700;
+  color: #334155;
+  font-size: 1.03rem;
+}
+
+.user-data-card-header-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+}
+
+.user-card-chevron {
+  color: #0f172a;
+  font-size: 1.84rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.user-data-card-body {
+  padding: 12px 14px;
+}
+
+.user-data-empty {
+  margin: 0;
+  color: #64748b;
+}
+
+.user-data-card .nested-row {
+  margin-bottom: 8px;
+}
+
+.user-companies-list {
+  margin-left: 12px;
+}
+
+.user-companies-select {
+  margin-left: 12px;
+}
+
+.user-phones-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.user-phone-card {
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.user-phone-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.user-phone-card-top strong,
+.user-address-card-top strong {
+  font-weight: 500;
+  color: #475569;
+  font-size: 0.88rem;
+}
+
+.user-phone-card-body p {
+  margin: 2px 0;
+  font-size: 0.92rem;
+}
+
+.user-data-card .user-addresses-section {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+
+.user-profile-modal .user-addresses-empty,
+.user-profile-modal .user-addresses-grid {
+  margin-left: 0;
+}
+
+.user-profile-modal .user-data-card-body .user-address-add-btn {
+  margin-left: 12px;
+}
+
+@media (max-width: 900px) {
+  .user-profile-layout {
+    grid-template-columns: 1fr;
+  }
+}
