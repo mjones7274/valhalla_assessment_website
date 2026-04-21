@@ -20,10 +20,13 @@ const PATIENT_EVENTS_API = `${API_BASE}/api/patient-events/`;
 const INJURY_EVENT_TYPES_API = `${API_BASE}/api/injury-event-types/`;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
+const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
+const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
 const TEST_SEND_EMAIL_API = `${API_BASE}/api/test/send-email`;
 const TEST_SEND_EMAIL_API_ALT = `${API_BASE}/api/test/send-email/`;
 const ASSESSMENTS_API = `${API_BASE}/api/assessments/`;
+const QUESTIONS_API = `${API_BASE}/api/questions/`;
 const PEOPLE_API = `${API_BASE}/api/people/`;
 const PERSON_TYPES_API = `${API_BASE}/api/person-types/`;
 const PHONE_TYPES_API = `${API_BASE}/api/phone-types/`;
@@ -282,6 +285,173 @@ const getAttemptProgressAttemptId = (progressItem) => Number(
   progressItem?.id ??
   0
 );
+
+const normalizeApiRows = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.results)) return payload.results;
+  return [];
+};
+
+const normalizeStoredAnswerValue = (value) => {
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+
+  const looksJson =
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"));
+
+  if (!looksJson) return value;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+};
+
+const getResponseAttemptId = (responseItem) => Number(
+  responseItem?.attempt?.id ??
+    responseItem?.attempt_id ??
+    responseItem?.assessment_attempt_id ??
+    responseItem?.patient_assessment_attempt_id ??
+    responseItem?.patient_assessment_attempt ??
+    responseItem?.attempt ??
+    0
+) || 0;
+
+const getResponseQuestionId = (responseItem) => Number(
+  responseItem?.question?.question_id ??
+    responseItem?.question_id ??
+    responseItem?.question ??
+    0
+) || 0;
+
+const getQuestionTypeDescription = (question) =>
+  String(
+    question?.question_type?.description ??
+      question?.question_type_description ??
+      question?.question_type ??
+      ""
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const formatAnswerKeyLabel = (key) =>
+  String(key ?? "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const formatAnswerValueForTable = (value) => {
+  if (value === null || value === undefined || value === "") return "—";
+
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+
+  if (Array.isArray(value)) {
+    if (!value.length) return "—";
+
+    const formattedItems = value
+      .map((item) => formatAnswerValueForTable(item))
+      .flatMap((item) => Array.isArray(item) ? item : [item])
+      .filter((item) => item && item !== "—");
+
+    return formattedItems.length ? formattedItems : "—";
+  }
+
+  if (typeof value === "object") {
+    const hasOption = Object.prototype.hasOwnProperty.call(value, "option");
+    const hasValue = Object.prototype.hasOwnProperty.call(value, "value");
+
+    if (hasOption || hasValue) {
+      const optionText = formatAnswerValueForTable(value.option);
+      const valueText = formatAnswerValueForTable(value.value);
+      return optionText !== "—" ? optionText : valueText;
+    }
+
+    const formattedEntries = Object.entries(value)
+      .map(([key, nestedValue]) => {
+        const formattedValue = formatAnswerValueForTable(nestedValue);
+        return formattedValue && formattedValue !== "—"
+          ? `${formatAnswerKeyLabel(key)}: ${formattedValue}`
+          : null;
+      })
+      .filter(Boolean);
+
+    return formattedEntries.length ? formattedEntries.join("; ") : "—";
+  }
+
+  return String(value);
+};
+
+const getAnswerUrl = (value) => {
+  const normalizedValue = String(value ?? "").trim();
+  if (!normalizedValue) return "";
+
+  try {
+    const parsed = new URL(normalizedValue);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+};
+
+const renderAnswerItem = (answer) => {
+  const answerUrl = getAnswerUrl(answer);
+  if (answerUrl) {
+    const linkLabel = /\.pdf(?:\?|#|$)/i.test(answerUrl) ? "Open document" : "Open link";
+    return (
+      <a
+        href={answerUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="patient-answers-link"
+      >
+        {linkLabel}
+      </a>
+    );
+  }
+
+  return answer;
+};
+
+const renderAnswerContent = (answer) => {
+  if (Array.isArray(answer)) {
+    return (
+      <ul className="patient-answers-list">
+        {answer.map((item, index) => (
+          <li key={`${String(item)}-${index}`}>{renderAnswerItem(item)}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return renderAnswerItem(answer);
+};
+
+const isBlankAnswerValue = (value) => {
+  if (value === null || value === undefined) return true;
+
+  if (typeof value === "string") {
+    return value.trim() === "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0 || value.every((item) => isBlankAnswerValue(item));
+  }
+
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    return entries.length === 0 || entries.every(([, nestedValue]) => isBlankAnswerValue(nestedValue));
+  }
+
+  return false;
+};
 
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
@@ -3450,6 +3620,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [isEventDropdownOpen, setIsEventDropdownOpen] = useState(false);
   const eventDropdownRef = useRef(null);
   const linkFeedbackTimeoutsRef = useRef({});
+  const questionDetailsByIdRef = useRef({});
   const [selectedAssessmentId, setSelectedAssessmentId] = useState("");
   const [loading, setLoading] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -3457,6 +3628,13 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [isDeleteAssessmentOpen, setIsDeleteAssessmentOpen] = useState(false);
   const [deletingAssessmentAttempt, setDeletingAssessmentAttempt] = useState(null);
   const [deletingAssessmentInProgress, setDeletingAssessmentInProgress] = useState(false);
+  const [showAnswersModal, setShowAnswersModal] = useState(false);
+  const [selectedAnswersAttempt, setSelectedAnswersAttempt] = useState(null);
+  const [answersLoading, setAnswersLoading] = useState(false);
+  const [answersError, setAnswersError] = useState("");
+  const [answerRows, setAnswerRows] = useState([]);
+  const [answerSignatures, setAnswerSignatures] = useState([]);
+  const [loadingAnswersAttemptId, setLoadingAnswersAttemptId] = useState(null);
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
@@ -3902,6 +4080,184 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       });
     }
   }, [fetchAttemptProgressByAttemptId]);
+
+  const fetchResponsesForAttempt = useCallback(async (attemptId) => {
+    const normalizedAttemptId = Number(attemptId);
+    if (!Number.isFinite(normalizedAttemptId) || normalizedAttemptId <= 0) {
+      return [];
+    }
+
+    const responseQueryPaths = [
+      `${PATIENT_RESPONSES_HISTORY_API}?assessment_attempt_id=${normalizedAttemptId}`,
+      `${PATIENT_RESPONSES_API}?attempt_id=${normalizedAttemptId}`,
+      `${PATIENT_RESPONSES_API}?assessment_attempt_id=${normalizedAttemptId}`,
+      `${PATIENT_RESPONSES_API}?attempt=${normalizedAttemptId}`,
+      `${PATIENT_RESPONSES_API}?patient_assessment_attempt_id=${normalizedAttemptId}`,
+    ];
+
+    for (const responsePath of responseQueryPaths) {
+      try {
+        const response = await apiRequest(responsePath);
+        if (!response.ok) continue;
+
+        const payload = await response.json();
+        const rows = normalizeApiRows(payload);
+        const matchingRows = rows.filter(
+          (responseItem) => getResponseAttemptId(responseItem) === normalizedAttemptId
+        );
+        const rowsWithKnownAttemptIds = rows.filter(
+          (responseItem) => getResponseAttemptId(responseItem) > 0
+        );
+        const hasMismatchedAttemptIds = rowsWithKnownAttemptIds.some(
+          (responseItem) => getResponseAttemptId(responseItem) !== normalizedAttemptId
+        );
+
+        if (matchingRows.length > 0) {
+          return matchingRows;
+        }
+
+        if (rows.length > 0 && !hasMismatchedAttemptIds) {
+          return rows;
+        }
+      } catch {
+        // Try the next endpoint variant.
+      }
+    }
+
+    const fallbackResponse = await apiRequest(PATIENT_RESPONSES_API);
+    const fallbackPayload = await fallbackResponse.json();
+    return normalizeApiRows(fallbackPayload).filter(
+      (responseItem) => getResponseAttemptId(responseItem) === normalizedAttemptId
+    );
+  }, []);
+
+  const fetchQuestionDetailsByIds = useCallback(async (questionIds) => {
+    const uniqueIds = Array.from(
+      new Set(
+        (questionIds || [])
+          .map((questionId) => Number(questionId))
+          .filter((questionId) => Number.isFinite(questionId) && questionId > 0)
+      )
+    );
+
+    await Promise.all(uniqueIds.map(async (questionId) => {
+      if (questionDetailsByIdRef.current[questionId]) return;
+
+      try {
+        const response = await apiRequest(`${QUESTIONS_API}${questionId}/`);
+        if (!response.ok) return;
+        const questionPayload = await response.json();
+        questionDetailsByIdRef.current[questionId] = questionPayload;
+      } catch {
+        // Fall back to the numeric id if question details cannot be resolved.
+      }
+    }));
+  }, []);
+
+  const handleViewAnswers = useCallback(async (attempt) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) {
+      return;
+    }
+
+    setShowAnswersModal(true);
+    setSelectedAnswersAttempt(attempt);
+    setAnswersLoading(true);
+    setAnswersError("");
+    setAnswerRows([]);
+    setAnswerSignatures([]);
+    setLoadingAnswersAttemptId(attemptId);
+
+    try {
+      const responses = await fetchResponsesForAttempt(attemptId);
+
+      responses.forEach((responseItem) => {
+        const questionId = getResponseQuestionId(responseItem);
+        const embeddedQuestion = responseItem?.question;
+        if (questionId && embeddedQuestion && typeof embeddedQuestion === "object") {
+          questionDetailsByIdRef.current[questionId] = embeddedQuestion;
+        }
+      });
+
+      await fetchQuestionDetailsByIds(
+        responses.map((responseItem) => getResponseQuestionId(responseItem))
+      );
+
+      const nextRows = [];
+      const nextSignatures = [];
+
+      responses.forEach((responseItem, index) => {
+        const questionId = getResponseQuestionId(responseItem);
+        const questionData =
+          questionDetailsByIdRef.current[questionId] ?? responseItem?.question ?? null;
+        const questionText =
+          String(questionData?.question ?? responseItem?.question?.question ?? "").trim() ||
+          `Question #${questionId || index + 1}`;
+        const questionTypeDescription = getQuestionTypeDescription(questionData);
+        const resolvedAnswerValue = normalizeStoredAnswerValue(
+          responseItem?.answer_value ??
+            responseItem?.answerValue ??
+            responseItem?.response_value ??
+            responseItem?.responseValue ??
+            responseItem?.answer ??
+            null
+        );
+
+        if (
+          questionTypeDescription === "signature_agreement" &&
+          resolvedAnswerValue &&
+          typeof resolvedAnswerValue === "object" &&
+          !Array.isArray(resolvedAnswerValue)
+        ) {
+          Object.entries(resolvedAnswerValue).forEach(([key, value]) => {
+            if (key === "signature_data_url") {
+              const signatureUrl = String(value ?? "").trim();
+              if (signatureUrl) {
+                nextSignatures.push({
+                  key: `${questionId}-signature`,
+                  question: questionText,
+                  signatureUrl,
+                });
+              }
+              return;
+            }
+
+            if (isBlankAnswerValue(value)) {
+              return;
+            }
+
+            nextRows.push({
+              key: `${questionId}-${key}`,
+              question: `${questionText} - ${formatAnswerKeyLabel(key)}`,
+              answer: formatAnswerValueForTable(value),
+            });
+          });
+          return;
+        }
+
+        if (isBlankAnswerValue(resolvedAnswerValue)) {
+          return;
+        }
+
+        nextRows.push({
+          key: `${questionId || index}-answer`,
+          question: questionText,
+          answer: formatAnswerValueForTable(resolvedAnswerValue),
+        });
+      });
+
+      setAnswerRows(nextRows);
+      setAnswerSignatures(nextSignatures);
+    } catch (error) {
+      console.error("Load assessment answers failed", error);
+      setAnswersError(error?.message || "Failed to load assessment answers.");
+      setAnswerRows([]);
+      setAnswerSignatures([]);
+    } finally {
+      setAnswersLoading(false);
+      setLoadingAnswersAttemptId(null);
+    }
+  }, [fetchQuestionDetailsByIds, fetchResponsesForAttempt]);
 
   const showLinkFeedback = useCallback((attempt, message) => {
     const feedbackKey = getAttemptFeedbackKey(attempt);
@@ -4411,6 +4767,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             <button
                               type="button"
                               className="assessments-action-btn"
+                              disabled={!isCompleted || loadingAnswersAttemptId === attemptId}
+                              onClick={() => handleViewAnswers(attempt)}
+                            >
+                              {loadingAnswersAttemptId === attemptId ? "Loading..." : "View Answers"}
+                            </button>
+                            <button
+                              type="button"
+                              className="assessments-action-btn"
                               disabled={isDisabledForActions}
                               onClick={() => {
                                 handleSendLink(attempt);
@@ -4457,6 +4821,106 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
         <div className="modal-actions">
           <button onClick={handleCloseModal}>Close</button>
         </div>
+
+        {showAnswersModal && (
+          <div className="modal-overlay" style={{ zIndex: 1300 }}>
+            <div className="modal modern patient-answers-modal">
+              <div className="modal-header">
+                <div className="patient-answers-modal-title-row">
+                  <h3>
+                    {`${getAssessmentName(selectedAnswersAttempt)} - ${`${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim() || patient?.email || "Patient"}`}
+                  </h3>
+                  <div className="patient-answers-score-pill-wrap">
+                    <span className="patient-answers-score-label">Total Score</span>
+                    <span className="patient-answers-score-pill">
+                      {formatFinalScoreForDisplay(getAttemptFinalScore(selectedAnswersAttempt))}
+                    </span>
+                  </div>
+                </div>
+                <button className="icon-close" onClick={() => setShowAnswersModal(false)}>✕</button>
+              </div>
+
+              <div className="patient-answers-modal-body">
+                {answersLoading ? (
+                  <div className="patient-answers-table-wrap patient-answers-table-skeleton-wrap" aria-hidden="true">
+                    <table className="patient-answers-table">
+                      <thead>
+                        <tr>
+                          <th>Question</th>
+                          <th>Answer</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[1, 2, 3, 4, 5].map((row) => (
+                          <tr key={`answer-skeleton-${row}`}>
+                            <td>
+                              <div className="skeleton-line patient-answers-skeleton-question" />
+                            </td>
+                            <td>
+                              <div className="skeleton-line patient-answers-skeleton-answer" />
+                              <div className="skeleton-line patient-answers-skeleton-answer short" />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : answersError ? (
+                  <div className="api-debug-error">{answersError}</div>
+                ) : answerRows.length === 0 && answerSignatures.length === 0 ? (
+                  <div className="people-empty">No answers found for this assessment.</div>
+                ) : (
+                  <>
+                    <div className="patient-answers-table-wrap">
+                      <table className="patient-answers-table">
+                        <thead>
+                          <tr>
+                            <th>Question</th>
+                            <th>Answer</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {answerRows.map((row) => (
+                            <tr key={row.key}>
+                              <td>{row.question}</td>
+                              <td>{renderAnswerContent(row.answer)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {answerSignatures.length > 0 && (
+                      <div className="patient-answers-signatures-section">
+                        <div className="patient-answers-signatures-title">Signature</div>
+                        <div className="patient-answers-signatures-grid">
+                          {answerSignatures.map((signatureItem) => (
+                            <div key={signatureItem.key} className="patient-answers-signature-card">
+                              <div className="patient-answers-signature-question">
+                                {signatureItem.question}
+                              </div>
+                              <div className="patient-answers-signature-box">
+                                <img
+                                  src={signatureItem.signatureUrl}
+                                  alt={`${signatureItem.question} signature`}
+                                  className="patient-answers-signature-image"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowAnswersModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {isDeleteAssessmentOpen && deletingAssessmentAttempt && (
           <div

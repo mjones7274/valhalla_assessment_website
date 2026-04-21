@@ -53,6 +53,20 @@ jobs:
             exit 0
           fi
 
-          aws cloudfront create-invalidation \
+          set +e
+          INVALIDATION_OUTPUT=$(aws cloudfront create-invalidation \
             --distribution-id "$DISTRIBUTION_ID" \
-            --paths "/" "/index.html" "/asset-manifest.json" "/static/*"
+            --paths "/" "/index.html" "/asset-manifest.json" "/static/*" 2>&1)
+          STATUS=$?
+          set -e
+
+          if [ $STATUS -ne 0 ]; then
+            echo "$INVALIDATION_OUTPUT"
+            if echo "$INVALIDATION_OUTPUT" | grep -qi "AccessDenied"; then
+              echo "Warning: Missing permission cloudfront:CreateInvalidation. Deploy completed, but cache was not invalidated."
+              exit 0
+            fi
+            exit $STATUS
+          fi
+
+          echo "$INVALIDATION_OUTPUT"

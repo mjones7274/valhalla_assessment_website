@@ -59,6 +59,11 @@ export default function QuestionModal({
   const isPerformTaskVideo =
     String(selectedQuestionType?.description ?? "").trim().toLowerCase() ===
     "perform_task_video";
+  const isSignatureAgreement =
+    String(selectedQuestionType?.description ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_") === "signature_agreement";
 
   const sortedChoices = [...editingQuestion.choices].sort(
         (a, b) => a.order - b.order
@@ -253,11 +258,18 @@ export default function QuestionModal({
             </select>
           </div>
 
-          {isPerformTaskVideo && (
+          {(isPerformTaskVideo || isSignatureAgreement) && (
             <div style={{ marginBottom: "16px" }}>
-              <label style={labelStyle}>Hyperlink</label>
+              <label style={labelStyle}>
+                {isSignatureAgreement ? "Document URL (PDF)" : "Hyperlink"}
+              </label>
               <input
                 style={inputStyle}
+                placeholder={
+                  isSignatureAgreement
+                    ? "https://.../agreement.pdf"
+                    : "https://..."
+                }
                 value={editingQuestion.hyperlink ?? ""}
                 onChange={(e) =>
                   setEditingQuestion({

@@ -2686,9 +2686,12 @@ const compareQuestionOrder = (left, right) => {
                 const selectedType = questionTypes.find(
                   (qt) => qt.question_type_id === Number(editingQuestion.question_type_id)
                 );
-                const isPerformTaskVideo =
-                  String(selectedType?.description ?? "").trim().toLowerCase() ===
-                  "perform_task_video";
+                const normalizedSelectedType = String(selectedType?.description ?? "")
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[\s-]+/g, "_");
+                const isPerformTaskVideo = normalizedSelectedType === "perform_task_video";
+                const isSignatureAgreement = normalizedSelectedType === "signature_agreement";
                 const parsedQuestionOrder = Number(editingQuestion.question_order);
                 const normalizedQuestionOrder =
                   Number.isFinite(parsedQuestionOrder) && parsedQuestionOrder > 0
@@ -2752,7 +2755,7 @@ const compareQuestionOrder = (left, right) => {
                   choices: editingQuestion.use_default_options
                     ? []
                     : editingQuestion.choices,
-                  ...(isPerformTaskVideo
+                  ...(isPerformTaskVideo || isSignatureAgreement
                     ? { hyperlink: String(editingQuestion.hyperlink ?? "").trim() }
                     : {}),
                 };

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Document, Page, pdfjs } from "react-pdf";
 import "./RunAssessment.css";
 import { getSelectedCompany } from "../auth";
 import { apiRequest } from "../api";
@@ -11,6 +12,11 @@ const API_BASE = process.env.REACT_APP_API_URL_BASE;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 
 const normalizePrefillPrompt = (value) => {
   const normalized = String(value ?? "")
@@ -82,6 +88,22 @@ const normalizeQuestionType = (question) =>
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+
+const getPersistedAnswerPayload = (question, responseValue) => {
+  if (normalizeQuestionType(question) !== "signature_agreement") {
+    return responseValue ?? null;
+  }
+
+  const normalizedResponse =
+    responseValue && typeof responseValue === "object" && !Array.isArray(responseValue)
+      ? responseValue
+      : {};
+
+  return {
+    ...normalizedResponse,
+    document_url: normalizeVideoUrl(question?.hyperlink ?? ""),
+  };
+};
 
 const getScaleResponseConfig = (questionType) => {
   const normalizedType = String(questionType ?? "").trim().toLowerCase();
@@ -356,6 +378,11 @@ const formatPhoneInput = (rawValue) => {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 };
 
+const normalizeZipcodeInput = (rawValue) =>
+  String(rawValue ?? "").replace(/\D/g, "").slice(0, 5);
+
+const isValidZipcodeResponse = (value) => /^\d{5}$/.test(normalizeZipcodeInput(value));
+
 const normalizeVideoUrl = (rawUrl) => {
   const value = String(rawUrl ?? "").trim();
   if (!value) return "";
@@ -372,6 +399,25 @@ const normalizeVideoUrl = (rawUrl) => {
 const isDirectVideoFileUrl = (urlValue) => {
   if (!urlValue) return false;
   return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(urlValue);
+};
+
+const getPdfFetchUrl = (rawUrl) => {
+  const normalized = normalizeVideoUrl(rawUrl);
+  if (!normalized) return "";
+
+  try {
+    const parsed = new URL(normalized);
+    const isLocalhost = typeof window !== "undefined" && window.location.hostname === "localhost";
+    const isValhallaDocsHost = /(^|\.)valhallahealthassessments\.com$/i.test(parsed.hostname);
+
+    if (isLocalhost && isValhallaDocsHost) {
+      return `/pdf-proxy${parsed.pathname}${parsed.search}`;
+    }
+
+    return normalized;
+  } catch {
+    return normalized;
+  }
 };
 
 const toEmbeddableVideoUrl = (rawUrl) => {
@@ -432,7 +478,7 @@ const toEmbeddableVideoUrl = (rawUrl) => {
   }
 };
 
-const SignatureDrawField = ({ value, onChange }) => {
+const SignatureDrawField = ({ value, onChange, disabled = false }) => {
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
   const isDrawingRef = useRef(false);
@@ -453,7 +499,7 @@ const SignatureDrawField = ({ value, onChange }) => {
 
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(280, Math.floor(wrapper.clientWidth));
-    const height = 210;
+    const height = 140;
 
     canvas.width = Math.floor(width * ratio);
     canvas.height = Math.floor(height * ratio);
@@ -516,6 +562,8 @@ const SignatureDrawField = ({ value, onChange }) => {
   };
 
   const startDraw = (event) => {
+    if (disabled) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -570,6 +618,8 @@ const SignatureDrawField = ({ value, onChange }) => {
   };
 
   const clearSignature = () => {
+    if (disabled) return;
+
     hasInkRef.current = false;
     onChange({
       signature_data_url: "",
@@ -578,8 +628,18 @@ const SignatureDrawField = ({ value, onChange }) => {
   };
 
   return (
-    <div className="run-assessment-signature-wrap">
-      <div className="run-assessment-signature-label">Sign Here</div>
+    <div className={`run-assessment-signature-wrap ${disabled ? "is-disabled" : ""}`}>
+      <div className="run-assessment-signature-header-row">
+        <div className="run-assessment-signature-label">Sign Here</div>
+        <button
+          type="button"
+          className="run-assessment-signature-clear-btn"
+          onClick={clearSignature}
+          disabled={disabled}
+        >
+          Clear Signature
+        </button>
+      </div>
       <div className="run-assessment-signature-canvas-wrap" ref={wrapperRef}>
         <canvas
           ref={canvasRef}
@@ -592,16 +652,6 @@ const SignatureDrawField = ({ value, onChange }) => {
         />
       </div>
 
-      <div className="run-assessment-signature-actions">
-        <button
-          type="button"
-          className="run-assessment-signature-clear-btn"
-          onClick={clearSignature}
-        >
-          Clear Signature
-        </button>
-      </div>
-
       <label className="run-assessment-signature-name-label" htmlFor="signature-full-name-input">
         Type Your Full Name Here:
       </label>
@@ -609,6 +659,7 @@ const SignatureDrawField = ({ value, onChange }) => {
         id="signature-full-name-input"
         type="text"
         value={fullName}
+        disabled={disabled}
         onChange={(event) =>
           onChange({
             signature_data_url: signatureDataUrl,
@@ -616,6 +667,169 @@ const SignatureDrawField = ({ value, onChange }) => {
           })
         }
         className="run-assessment-input"
+      />
+    </div>
+  );
+};
+
+const AgreementSignatureField = ({ value, onChange, documentUrl, documentName }) => {
+  const scrollRef = useRef(null);
+  const widthRef = useRef(null);
+  const hasUserScrolledRef = useRef(false);
+  const [numPages, setNumPages] = useState(0);
+  const [pageWidth, setPageWidth] = useState(720);
+  const [documentLoadError, setDocumentLoadError] = useState("");
+
+  const normalizedValue = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+  const signatureDataUrl = String(normalizedValue.signature_data_url ?? "");
+  const fullName = String(normalizedValue.full_name ?? "");
+  const hasViewedDocument = Boolean(normalizedValue.document_viewed);
+  const normalizedDocumentUrl = normalizeVideoUrl(documentUrl);
+  const documentFetchUrl = getPdfFetchUrl(documentUrl);
+  const displayDocumentName = String(documentName ?? "").trim() || "Agreement Document";
+  const documentOptions = useMemo(() => ({
+    disableRange: true,
+    disableStream: true,
+    disableAutoFetch: true,
+  }), []);
+
+  const markDocumentViewedIfAtEnd = useCallback(() => {
+    if (hasViewedDocument) return;
+    if (!hasUserScrolledRef.current) return;
+
+    const scrollNode = scrollRef.current;
+    if (!scrollNode) return;
+
+    const hasVerticalOverflow = scrollNode.scrollHeight > scrollNode.clientHeight + 8;
+    if (!hasVerticalOverflow) return;
+
+    const hasMovedFromTop = scrollNode.scrollTop > 0;
+    if (!hasMovedFromTop) return;
+
+    const reachedEnd = scrollNode.scrollTop + scrollNode.clientHeight >= scrollNode.scrollHeight - 8;
+    if (!reachedEnd) return;
+
+    onChange({
+      ...normalizedValue,
+      document_viewed: true,
+      signature_data_url: signatureDataUrl,
+      full_name: fullName,
+    });
+  }, [fullName, hasViewedDocument, normalizedValue, onChange, signatureDataUrl]);
+
+  const markDocumentViewedFromOpen = useCallback(() => {
+    if (hasViewedDocument) return;
+
+    onChange({
+      ...normalizedValue,
+      document_viewed: true,
+      signature_data_url: signatureDataUrl,
+      full_name: fullName,
+    });
+  }, [fullName, hasViewedDocument, normalizedValue, onChange, signatureDataUrl]);
+
+  useEffect(() => {
+    const updatePageWidth = () => {
+      const containerWidth = widthRef.current?.clientWidth ?? 760;
+      const nextWidth = Math.max(280, Math.floor(containerWidth - 24));
+      setPageWidth(nextWidth);
+    };
+
+    updatePageWidth();
+    window.addEventListener("resize", updatePageWidth);
+    return () => {
+      window.removeEventListener("resize", updatePageWidth);
+    };
+  }, []);
+
+  const handleDocumentScroll = () => {
+    hasUserScrolledRef.current = true;
+    markDocumentViewedIfAtEnd();
+  };
+
+  return (
+    <div className="run-assessment-agreement-wrap">
+      <div className="run-assessment-agreement-doc-card">
+        <div className="run-assessment-agreement-doc-header">
+          <div className="run-assessment-agreement-doc-title">{displayDocumentName}</div>
+          {normalizedDocumentUrl && (
+            <a
+              href={normalizedDocumentUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="run-assessment-agreement-doc-link"
+              onClick={markDocumentViewedFromOpen}
+            >
+              Open document
+            </a>
+          )}
+        </div>
+
+        <div
+          ref={scrollRef}
+          className="run-assessment-agreement-doc-scroll"
+          onScroll={handleDocumentScroll}
+        >
+          <div ref={widthRef} className="run-assessment-agreement-doc-pages">
+            {!normalizedDocumentUrl ? (
+              <div className="run-assessment-video-empty">
+                No agreement document URL is configured for this question.
+              </div>
+            ) : (
+              <Document
+                file={documentFetchUrl}
+                options={documentOptions}
+                onLoadSuccess={({ numPages: nextPageCount }) => {
+                  setDocumentLoadError("");
+                  setNumPages(nextPageCount);
+                }}
+                onLoadError={(error) => {
+                  setNumPages(0);
+                  setDocumentLoadError(String(error?.message ?? "Unable to load PDF document."));
+                }}
+                loading={<div className="run-assessment-agreement-doc-loading">Loading document...</div>}
+              >
+                {Array.from({ length: numPages }, (_, index) => (
+                  <div key={`agreement-page-${index + 1}`} className="run-assessment-agreement-doc-page">
+                    <Page
+                      pageNumber={index + 1}
+                      width={pageWidth}
+                      renderAnnotationLayer={false}
+                      renderTextLayer={false}
+                    />
+                  </div>
+                ))}
+              </Document>
+            )}
+
+            {documentLoadError && (
+              <div className="run-assessment-video-empty">
+                Could not load this PDF. {documentLoadError}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="run-assessment-agreement-scroll-note">
+          {hasViewedDocument
+            ? "Document review complete. You can now sign below."
+            : "Scroll to the end of the document to unlock the signature fields."}
+        </div>
+      </div>
+
+      <SignatureDrawField
+        value={{ signature_data_url: signatureDataUrl, full_name: fullName }}
+        disabled={!hasViewedDocument}
+        onChange={(nextSignature) =>
+          onChange({
+            ...normalizedValue,
+            document_viewed: hasViewedDocument,
+            signature_data_url: String(nextSignature?.signature_data_url ?? ""),
+            full_name: String(nextSignature?.full_name ?? ""),
+          })
+        }
       />
     </div>
   );
@@ -638,6 +852,9 @@ const getInitialResponse = (questionType) => {
   }
   if (questionType === "signature_draw") {
     return { signature_data_url: "", full_name: "" };
+  }
+  if (questionType === "signature_agreement") {
+    return { document_viewed: false, signature_data_url: "", full_name: "" };
   }
   return "";
 };
@@ -1681,6 +1898,8 @@ export default function RunAssessment({
     `${currentItem?.sectionId ?? "section"}-${currentItem?.questionOrder ?? currentIndex + 1}`;
 
   const questionType = normalizeQuestionType(question);
+  const isZipcodeQuestion = questionType === "zipcode" || questionType === "zip_code";
+  const isSignatureAgreementQuestion = questionType === "signature_agreement";
   const isNoResponseQuestion =
     questionType === "no_response" || questionType === "perform_task_video";
   const currentResponse =
@@ -1694,6 +1913,18 @@ export default function RunAssessment({
       : {};
   const hasSignatureDrawing = String(signatureResponse?.signature_data_url ?? "").trim().length > 0;
   const hasSignatureName = String(signatureResponse?.full_name ?? "").trim().length > 0;
+  const signatureAgreementResponse =
+    currentResponse && typeof currentResponse === "object" && !Array.isArray(currentResponse)
+      ? currentResponse
+      : {};
+  const hasAgreementDocumentViewed = Boolean(signatureAgreementResponse?.document_viewed);
+  const hasAgreementSignatureDrawing =
+    String(signatureAgreementResponse?.signature_data_url ?? "").trim().length > 0;
+  const hasAgreementSignatureName =
+    String(signatureAgreementResponse?.full_name ?? "").trim().length > 0;
+  const isIncompleteSignatureAgreement =
+    isSignatureAgreementQuestion &&
+    (!hasAgreementDocumentViewed || !hasAgreementSignatureDrawing || !hasAgreementSignatureName);
 
   const persistResponseAndAttemptState = async ({
     targetIndex,
@@ -1704,7 +1935,7 @@ export default function RunAssessment({
 
     const questionNumericId = Number(questionId);
     const hasValidQuestionId = Number.isFinite(questionNumericId) && questionNumericId > 0;
-    const answerPayload = currentResponse ?? null;
+    const answerPayload = getPersistedAnswerPayload(question, currentResponse);
     const scoreValuePayload = getScoreValueFromAnswer(answerPayload);
 
     if (hasValidQuestionId) {
@@ -2241,8 +2472,11 @@ export default function RunAssessment({
     questionType === "perform_task_video" &&
     (currentVideoSource.kind === "native" || (Boolean(currentYouTubeVideoId) && !isYouTubeFallbackActive));
   const isCurrentVideoCompleted = Boolean(videoCompletionByQuestionId[questionId]);
+  const isInvalidZipcodeResponse = isZipcodeQuestion && !isValidZipcodeResponse(currentResponse);
   const isMissingRequiredResponse = isCurrentQuestionRequired && (
-    isSignatureDrawQuestion
+    isSignatureAgreementQuestion
+      ? isIncompleteSignatureAgreement
+      : isSignatureDrawQuestion
       ? (!hasSignatureDrawing || !hasSignatureName)
       : (!isNoResponseQuestion && !hasCurrentResponse)
   );
@@ -2548,7 +2782,12 @@ export default function RunAssessment({
   };
 
   const goNext = () => {
-    if (isMissingRequiredResponse || isMissingRequiredVideoCompletion) return;
+    if (
+      isMissingRequiredResponse ||
+      isMissingRequiredVideoCompletion ||
+      isInvalidZipcodeResponse ||
+      isIncompleteSignatureAgreement
+    ) return;
     const nextIndex = Math.min(totalQuestions - 1, currentIndex + 1);
     if (nextIndex === currentIndex) return;
 
@@ -2578,7 +2817,12 @@ export default function RunAssessment({
 
   const submitAssessment = () => {
     if (isSubmitting) return;
-    if (isMissingRequiredResponse || isMissingRequiredVideoCompletion) return;
+    if (
+      isMissingRequiredResponse ||
+      isMissingRequiredVideoCompletion ||
+      isInvalidZipcodeResponse ||
+      isIncompleteSignatureAgreement
+    ) return;
 
     logSelectedAnswer("Submit");
     console.log("[RunAssessment] Submit payload", {
@@ -2752,6 +2996,28 @@ export default function RunAssessment({
     }
 
     switch (questionType) {
+      case "signature_agreement":
+        return (
+          <AgreementSignatureField
+            value={currentResponse}
+            onChange={setResponse}
+            documentUrl={String(question?.hyperlink ?? "")}
+            documentName={String(question?.title ?? question?.question ?? "Agreement Document")}
+          />
+        );
+      case "zipcode":
+      case "zip_code":
+        return (
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={5}
+            value={normalizeZipcodeInput(currentResponse)}
+            onChange={(event) => setResponse(normalizeZipcodeInput(event.target.value))}
+            className="run-assessment-input"
+          />
+        );
       case "free_response":
         return (
           <input
@@ -3239,7 +3505,9 @@ export default function RunAssessment({
                 disabled={
                   isSubmitting ||
                   isMissingRequiredResponse ||
-                  isMissingRequiredVideoCompletion
+                  isMissingRequiredVideoCompletion ||
+                  isInvalidZipcodeResponse ||
+                  isIncompleteSignatureAgreement
                 }
               >
                 <span>{currentIndex === totalQuestions - 1 ? "SUBMIT" : "Next"}</span>

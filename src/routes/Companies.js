@@ -706,13 +706,14 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     return `${label} ${apiDebugSortDirection === "asc" ? "▲" : "▼"}`;
   };
 
-  if (!company) return null;
-
-  const handleOpenApiDebugModal = async () => {
+  const loadApiDebugRows = useCallback(async ({ openModal = false } = {}) => {
     if (!company?.company_id) return;
 
-    setShowApiDebugModal(true);
-    setSelectedApiDebugRow(null);
+    if (openModal) {
+      setShowApiDebugModal(true);
+      setSelectedApiDebugRow(null);
+    }
+
     setApiDebugLoading(true);
     setApiDebugError("");
 
@@ -731,6 +732,16 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     } finally {
       setApiDebugLoading(false);
     }
+  }, [company?.company_id]);
+
+  if (!company) return null;
+
+  const handleOpenApiDebugModal = () => {
+    loadApiDebugRows({ openModal: true });
+  };
+
+  const handleRefreshApiDebugRows = () => {
+    loadApiDebugRows();
   };
 
   return (
@@ -1020,8 +1031,21 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
           <div className="modal-overlay" style={{ zIndex: 1300 }}>
             <div className="modal modern api-debug-modal">
               <div className="modal-header">
-                <h3>API DEBUG DATA</h3>
-                <button className="icon-close" onClick={() => setShowApiDebugModal(false)}>✕</button>
+                <div className="api-debug-modal-title-row">
+                  <h3>API DEBUG DATA</h3>
+                  <button
+                    className="api-debug-refresh-btn"
+                    onClick={handleRefreshApiDebugRows}
+                    disabled={apiDebugLoading}
+                    title={apiDebugLoading ? "Refreshing..." : "Refresh"}
+                    aria-label={apiDebugLoading ? "Refreshing..." : "Refresh"}
+                  >
+                    {apiDebugLoading ? "⟳" : "↻"}
+                  </button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button className="icon-close" onClick={() => setShowApiDebugModal(false)}>✕</button>
+                </div>
               </div>
 
               {apiDebugLoading ? (

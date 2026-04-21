@@ -138,6 +138,32 @@
   opacity: 1;
 }
 
+.api-debug-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.api-debug-refresh-btn {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.api-debug-refresh-btn:hover:not(:disabled) {
+  color: #1d4ed8;
+}
+
+.api-debug-refresh-btn:disabled {
+  color: #93c5fd;
+  cursor: not-allowed;
+}
+
 .details-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
