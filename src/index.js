@@ -15,7 +15,6 @@ import Patients from "./routes/Patients";
 import Companies from "./routes/Companies";
 import AssessmentDetails from "./routes/AssessmentDetails";
 import TakeAssessment from "./routes/TakeAssessment";
-import { apiRequest } from "./api";
 import {
   clearSelectedCompany,
   ensureActiveSession,
@@ -32,9 +31,6 @@ import {
 } from "./auth";
 
 import "./App.css";
-
-const ADMIN_COMPANY_ID = 1;
-const ADMIN_COMPANY_API = `${process.env.REACT_APP_API_URL_BASE}/api/companies/${ADMIN_COMPANY_ID}/`;
 const SESSION_EXPIRY_COUNTDOWN_SECONDS = Number(
   process.env.REACT_APP_SESSION_EXPIRY_COUNTDOWN_SECONDS || 30
 );
@@ -164,19 +160,19 @@ const AppLayout = () => {
 
   const syncSelectedCompanyForUser = React.useCallback(async (me) => {
     const userTypeId = getUserTypeId(me);
+    const associatedCompanies = normalizeAssociatedCompanies(me);
+    const storedCompany = getSelectedCompany();
+    const storedKey = storedCompany ? getCompanyKey(storedCompany) : "";
+    const matchedStoredCompany = associatedCompanies.find(
+      (company) => getCompanyKey(company) === storedKey
+    );
 
     if (userTypeId === 3) {
-      try {
-        const companyRes = await apiRequest(ADMIN_COMPANY_API);
-        const companyData = await companyRes.json();
-
-        if (companyData && typeof companyData === "object") {
-          setSelectedCompany(companyData);
-        } else {
-          clearSelectedCompany();
-        }
-      } catch (error) {
-        console.error("Failed to load admin company context", error);
+      if (matchedStoredCompany) {
+        setSelectedCompany(matchedStoredCompany);
+      } else if (associatedCompanies.length === 1) {
+        setSelectedCompany(associatedCompanies[0]);
+      } else {
         clearSelectedCompany();
       }
 
@@ -185,8 +181,6 @@ const AppLayout = () => {
       setSelectedCompanyKey("");
       return;
     }
-
-    const associatedCompanies = normalizeAssociatedCompanies(me);
 
     if (associatedCompanies.length === 0) {
       clearSelectedCompany();
@@ -203,12 +197,6 @@ const AppLayout = () => {
       setSelectedCompanyKey("");
       return;
     }
-
-    const storedCompany = getSelectedCompany();
-    const storedKey = storedCompany ? getCompanyKey(storedCompany) : "";
-    const matchedStoredCompany = associatedCompanies.find(
-      (company) => getCompanyKey(company) === storedKey
-    );
 
     if (matchedStoredCompany) {
       setSelectedCompany(matchedStoredCompany);

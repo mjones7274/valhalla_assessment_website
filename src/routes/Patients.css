@@ -899,6 +899,17 @@
   margin-left: auto;
 }
 
+.patient-assessments-modal .assessment-card-actions {
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.patient-assessments-modal .assessment-card-actions .assessments-action-btn,
+.patient-assessments-modal .assessment-card-actions .remove-assessment-btn {
+  padding: 4px 8px;
+  font-size: 0.78rem;
+}
+
 .modal.modern.patient-answers-modal {
   width: min(960px, calc(100vw - 40px));
   max-height: 88vh;

@@ -12,6 +12,7 @@ const API_BASE = process.env.REACT_APP_API_URL_BASE;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
+const ASSESSMENT_CLASSIFICATIONS_API = `${API_BASE}/api/assessment-classifications/`;
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -152,6 +153,31 @@ const toBooleanRequired = (value) => {
     return normalized === "true" || normalized === "1";
   }
   return false;
+};
+
+const getQuestionSectionBoolean = (questionSection, fieldName) =>
+  toBooleanRequired(
+    questionSection?.[fieldName] ??
+      questionSection?.question_section?.[fieldName] ??
+      false
+  );
+
+const getQuestionSectionTypeLabel = (questionSection, fieldName) => {
+  const rawValue =
+    questionSection?.[fieldName] ??
+    questionSection?.question_section?.[fieldName] ??
+    null;
+
+  if (!rawValue) return "";
+
+  if (typeof rawValue === "object") {
+    return String(rawValue?.description ?? rawValue?.label ?? rawValue?.name ?? "")
+      .trim()
+      .replace(/_/g, " ");
+  }
+
+  const text = String(rawValue).trim();
+  return text ? `Type ${text}` : "";
 };
 
 const hasResponseValue = (value) => {
@@ -317,10 +343,10 @@ const normalizeOptions = (question) => {
   const questionTypeOptions = question?.question_type?.options;
   const questionChoices = question?.choices;
 
-  const options = hasPopulatedOptions(questionTypeOptions)
-    ? questionTypeOptions
-    : hasPopulatedOptions(questionChoices)
-      ? questionChoices
+  const options = hasPopulatedOptions(questionChoices)
+    ? questionChoices
+    : hasPopulatedOptions(questionTypeOptions)
+      ? questionTypeOptions
       : null;
 
   if (!options) return [];
@@ -955,6 +981,144 @@ const normalizeStoredAnswerValue = (value) => {
   } catch {
     return value;
   }
+};
+
+const unwrapAssessmentResponseRow = (responseItem) =>
+  responseItem?.patient_response ??
+  responseItem?.response ??
+  responseItem?.patient_response_history ??
+  responseItem?.history_record ??
+  responseItem;
+
+const getAssessmentResponseQuestionId = (responseItem) =>
+  Number(
+    unwrapAssessmentResponseRow(responseItem)?.question?.question_id ??
+      unwrapAssessmentResponseRow(responseItem)?.question_id ??
+      unwrapAssessmentResponseRow(responseItem)?.question ??
+      0
+  ) || 0;
+
+const getAssessmentResponseAttemptId = (responseItem) =>
+  Number(
+    unwrapAssessmentResponseRow(responseItem)?.attempt?.id ??
+      unwrapAssessmentResponseRow(responseItem)?.attempt_id ??
+      unwrapAssessmentResponseRow(responseItem)?.assessment_attempt_id ??
+      unwrapAssessmentResponseRow(responseItem)?.patient_assessment_attempt_id ??
+      unwrapAssessmentResponseRow(responseItem)?.patient_assessment_attempt ??
+      unwrapAssessmentResponseRow(responseItem)?.attempt ??
+      0
+  ) || 0;
+
+const getAssessmentResponseCalcValue = (responseItem) => {
+  const resolvedResponse = unwrapAssessmentResponseRow(responseItem);
+  const rawCalcValue =
+    resolvedResponse?.calc_value ??
+    resolvedResponse?.calcValue ??
+    resolvedResponse?.calculated_value ??
+    resolvedResponse?.calculatedValue ??
+    0;
+
+  const numericCalcValue = Number(rawCalcValue);
+  return Number.isFinite(numericCalcValue) ? numericCalcValue : 0;
+};
+
+const getAssessmentResponseAnswerValue = (responseItem) =>
+  normalizeStoredAnswerValue(
+    unwrapAssessmentResponseRow(responseItem)?.answer_value ??
+      unwrapAssessmentResponseRow(responseItem)?.answerValue ??
+      unwrapAssessmentResponseRow(responseItem)?.response_value ??
+      unwrapAssessmentResponseRow(responseItem)?.responseValue ??
+      unwrapAssessmentResponseRow(responseItem)?.answer ??
+      null
+  );
+
+const collectPositiveOptionLabels = (answerValue) => {
+  if (Array.isArray(answerValue)) {
+    return answerValue.flatMap((entry) => collectPositiveOptionLabels(entry));
+  }
+
+  if (answerValue && typeof answerValue === "object") {
+    const optionLabel = String(answerValue?.option ?? "").trim();
+    const numericValue = toFiniteNumberOrNull(answerValue?.value);
+
+    if (optionLabel && numericValue !== null && numericValue >= 1) {
+      return [optionLabel];
+    }
+
+    return Object.values(answerValue).flatMap((entry) => collectPositiveOptionLabels(entry));
+  }
+
+  return [];
+};
+
+const computeAssessment1001AttemptMetrics = (responseRows) => {
+  const getResponseForQuestionId = (questionId) =>
+    (responseRows || []).find((responseItem) => getAssessmentResponseQuestionId(responseItem) === questionId) || null;
+
+  const sumCalcValues = (questionIds) =>
+    questionIds.reduce(
+      (total, questionId) => total + getAssessmentResponseCalcValue(getResponseForQuestionId(questionId)),
+      0
+    );
+
+  const locSelfScore = sumCalcValues([18, 19]);
+  const locWitnessScore = getAssessmentResponseCalcValue(getResponseForQuestionId(20));
+  const aocSelfScore = sumCalcValues([22, 23]);
+  const aocWitnessScore = getAssessmentResponseCalcValue(getResponseForQuestionId(24));
+  const ptaSelfScore = sumCalcValues([26, 27]);
+  const ptaWitnessScore = getAssessmentResponseCalcValue(getResponseForQuestionId(28));
+  const classCalcValue =
+    locSelfScore +
+    locWitnessScore +
+    aocSelfScore +
+    aocWitnessScore +
+    ptaSelfScore +
+    ptaWitnessScore;
+
+  const baselinePositiveOptionSet = new Set(
+    collectPositiveOptionLabels(getAssessmentResponseAnswerValue(getResponseForQuestionId(31)))
+  );
+  const acutePositiveOptions = Array.from(
+    new Set(collectPositiveOptionLabels(getAssessmentResponseAnswerValue(getResponseForQuestionId(33))))
+  );
+  const currentPositiveOptions = Array.from(
+    new Set(collectPositiveOptionLabels(getAssessmentResponseAnswerValue(getResponseForQuestionId(35))))
+  );
+  const symptomProgressionOptionSet = new Set(
+    acutePositiveOptions.filter((optionLabel) => !baselinePositiveOptionSet.has(optionLabel))
+  );
+
+  currentPositiveOptions.forEach((optionLabel) => {
+    symptomProgressionOptionSet.add(optionLabel);
+  });
+
+  return {
+    loc_self_score: locSelfScore,
+    loc_witness_score: locWitnessScore,
+    aoc_self_score: aocSelfScore,
+    aoc_witness_score: aocWitnessScore,
+    pta_self_score: ptaSelfScore,
+    pta_witness_score: ptaWitnessScore,
+    class_calc_value: classCalcValue,
+    symptom_progression_score: symptomProgressionOptionSet.size,
+  };
+};
+
+const resolveAttemptClassification = (classificationRows, classCalcValue) => {
+  const numericClassCalcValue = Number(classCalcValue);
+  if (!Number.isFinite(numericClassCalcValue)) return null;
+
+  const matchingClassification = (classificationRows || []).find((row) => {
+    const valueFrom = Number(row?.value_from);
+    const valueTo = Number(row?.value_to);
+
+    if (!Number.isFinite(valueFrom) || !Number.isFinite(valueTo)) return false;
+
+    return numericClassCalcValue >= valueFrom && numericClassCalcValue <= valueTo;
+  });
+
+  const classificationText = String(matchingClassification?.classification ?? "").trim();
+  return classificationText || null;
 };
 
 const getRulePriorityValue = (rule) => {
@@ -1917,6 +2081,14 @@ export default function RunAssessment({
     currentResponse && typeof currentResponse === "object" && !Array.isArray(currentResponse)
       ? currentResponse
       : {};
+  const currentQuestionHasSubquestion = getQuestionSectionBoolean(
+    currentItem?.questionSection,
+    "has_subquestion"
+  );
+  const currentSubQuestionTypeLabel = getQuestionSectionTypeLabel(
+    currentItem?.questionSection,
+    "sub_question_type"
+  );
   const hasAgreementDocumentViewed = Boolean(signatureAgreementResponse?.document_viewed);
   const hasAgreementSignatureDrawing =
     String(signatureAgreementResponse?.signature_data_url ?? "").trim().length > 0;
@@ -1936,7 +2108,16 @@ export default function RunAssessment({
     const questionNumericId = Number(questionId);
     const hasValidQuestionId = Number.isFinite(questionNumericId) && questionNumericId > 0;
     const answerPayload = getPersistedAnswerPayload(question, currentResponse);
-    const scoreValuePayload = getScoreValueFromAnswer(answerPayload);
+    const shouldIncludeScoreValue = toBooleanRequired(
+      currentItem?.questionSection?.include_sum_total ??
+      currentItem?.questionSection?.question_section?.include_sum_total ??
+      false
+    );
+    const calculatedQuestionValue = getScoreValueFromAnswer(answerPayload);
+    const scoreValuePayload = shouldIncludeScoreValue
+      ? calculatedQuestionValue
+      : 0;
+    const calcValuePayload = calculatedQuestionValue ?? 0;
 
     if (hasValidQuestionId) {
       const existingResponseId = responseIdByQuestionIdRef.current[questionNumericId] ?? null;
@@ -1983,6 +2164,7 @@ export default function RunAssessment({
           body: JSON.stringify({
             answer_value: answerPayload,
             score_value: scoreValuePayload,
+            calc_value: calcValuePayload,
           }),
         });
 
@@ -1992,6 +2174,8 @@ export default function RunAssessment({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               answer_value: answerPayload,
+              score_value: scoreValuePayload,
+              calc_value: calcValuePayload,
             }),
           });
 
@@ -2022,6 +2206,7 @@ export default function RunAssessment({
           question_id: questionNumericId,
           answer_value: answerPayload,
           score_value: scoreValuePayload,
+          calc_value: calcValuePayload,
         };
 
         const withOptionalContext = (payload) => ({
@@ -2053,21 +2238,29 @@ export default function RunAssessment({
             assessment_attempt_id: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
+            score_value: scoreValuePayload,
+            calc_value: calcValuePayload,
           },
           {
             patient_assessment_attempt_id: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
+            score_value: scoreValuePayload,
+            calc_value: calcValuePayload,
           },
           {
             patient_assessment_attempt: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
+            score_value: scoreValuePayload,
+            calc_value: calcValuePayload,
           },
           {
             attempt_id: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
+            score_value: scoreValuePayload,
+            calc_value: calcValuePayload,
           },
         ];
 
@@ -2132,6 +2325,68 @@ export default function RunAssessment({
       return await fetchJson(`${API_BASE}/api/total-score/${resolvedAttemptId}/`);
     } catch {
       return fetchJson(`${API_BASE}/api/total-score/${resolvedAttemptId}`);
+    }
+  };
+
+  const persistAssessment1001AttemptMetrics = async (attemptNumericId) => {
+    if (numericAssessmentId !== 1001) return;
+
+    const resolvedAttemptId = Number(attemptNumericId);
+    if (!Number.isFinite(resolvedAttemptId) || resolvedAttemptId <= 0) {
+      throw new Error("Missing attempt id for assessment 1001 metric calculation");
+    }
+
+    const historyRes = await requestFn(
+      `${PATIENT_RESPONSES_HISTORY_API}?assessment_attempt_id=${resolvedAttemptId}`
+    );
+
+    if (!historyRes.ok) {
+      const message = await historyRes.text().catch(() => "");
+      throw new Error(
+        `Assessment 1001 metric history request failed (${historyRes.status}) ${message}`
+      );
+    }
+
+    const historyPayload = await historyRes.json();
+    const historyRows = normalizeApiRows(historyPayload);
+    const matchingRows = historyRows.filter((responseItem) => {
+      const responseAttemptId = getAssessmentResponseAttemptId(responseItem);
+      return !responseAttemptId || responseAttemptId === resolvedAttemptId;
+    });
+    const metrics = computeAssessment1001AttemptMetrics(matchingRows);
+    const classificationsRes = await requestFn(
+      `${ASSESSMENT_CLASSIFICATIONS_API}?assessment_id=${numericAssessmentId}`
+    );
+
+    if (!classificationsRes.ok) {
+      const message = await classificationsRes.text().catch(() => "");
+      throw new Error(
+        `Assessment classification request failed (${classificationsRes.status}) ${message}`
+      );
+    }
+
+    const classificationsPayload = await classificationsRes.json();
+    const classificationRows = normalizeApiRows(classificationsPayload);
+    const classification = resolveAttemptClassification(
+      classificationRows,
+      metrics.class_calc_value
+    );
+
+    const patchRes = await requestFn(`${PATIENT_ASSESSMENT_ATTEMPTS_API}${resolvedAttemptId}/`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "completed",
+        ...metrics,
+        classification,
+      }),
+    });
+
+    if (!patchRes.ok) {
+      const message = await patchRes.text().catch(() => "");
+      throw new Error(
+        `Assessment 1001 metric patch failed (${patchRes.status}) ${message}`
+      );
     }
   };
 
@@ -2843,6 +3098,12 @@ export default function RunAssessment({
             });
 
             try {
+              await persistAssessment1001AttemptMetrics(attemptId);
+            } catch (metricError) {
+              console.error("Failed to update assessment 1001 attempt metrics", metricError);
+            }
+
+            try {
               const payload = await fetchAttemptTotalScore(attemptId);
               const totalScoreValue = toFiniteNumberOrNull(payload?.total_score) ?? 0;
 
@@ -3462,6 +3723,10 @@ export default function RunAssessment({
                   <span>Section Question Order: {currentItem.questionOrder && currentItem.questionOrder > 0 ? currentItem.questionOrder : "null"}</span>
                   <span>Title: {question?.title || "Untitled Question"}</span>
                   <span>Type: {questionType || "—"}</span>
+                  <span>Has Subquestion: {currentQuestionHasSubquestion ? "Yes" : "No"}</span>
+                  {currentQuestionHasSubquestion && (
+                    <span>Subquestion Type: {currentSubQuestionTypeLabel || "—"}</span>
+                  )}
                 </div>
               </>
             )}

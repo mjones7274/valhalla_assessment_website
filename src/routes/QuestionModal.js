@@ -98,6 +98,11 @@ export default function QuestionModal({
     editingQuestion.target_section_id === null
       ? ""
       : String(editingQuestion.target_section_id);
+  const subQuestionTypeId =
+    editingQuestion.sub_question_type === undefined ||
+    editingQuestion.sub_question_type === null
+      ? ""
+      : String(editingQuestion.sub_question_type);
     // console.log("sorted choices", sortedChoices)
 
   return (
@@ -199,7 +204,7 @@ export default function QuestionModal({
             />
           </div>
 
-          <div style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "16px", display: "flex", gap: "20px", flexWrap: "wrap" }}>
             <label style={{ ...labelStyle, display: "flex", gap: "8px", alignItems: "center" }}>
               <input
                 type="checkbox"
@@ -213,6 +218,77 @@ export default function QuestionModal({
               />
               Required
             </label>
+
+            <label style={{ ...labelStyle, display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(editingQuestion.include_sum_total)}
+                onChange={(e) =>
+                  setEditingQuestion({
+                    ...editingQuestion,
+                    include_sum_total: e.target.checked,
+                  })
+                }
+              />
+              Include in Total Score
+            </label>
+
+            <label style={{ ...labelStyle, display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(editingQuestion.unique_calculation)}
+                onChange={(e) =>
+                  setEditingQuestion({
+                    ...editingQuestion,
+                    unique_calculation: e.target.checked,
+                  })
+                }
+              />
+              Unique Calculation
+            </label>
+
+            <label style={{ ...labelStyle, display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(editingQuestion.has_subquestion)}
+                onChange={(e) =>
+                  setEditingQuestion({
+                    ...editingQuestion,
+                    has_subquestion: e.target.checked,
+                    sub_question_type: e.target.checked
+                      ? editingQuestion.sub_question_type ?? ""
+                      : "",
+                  })
+                }
+              />
+              Has Subquestion
+            </label>
+          </div>
+
+          <div style={{ marginBottom: "16px" }}>
+            <label style={labelStyle}>Subquestion Type</label>
+            <select
+              style={{
+                ...inputStyle,
+                opacity: editingQuestion.has_subquestion ? 1 : 0.6,
+                cursor: editingQuestion.has_subquestion ? "pointer" : "not-allowed",
+              }}
+              value={subQuestionTypeId}
+              disabled={!editingQuestion.has_subquestion}
+              onChange={(e) =>
+                setEditingQuestion({
+                  ...editingQuestion,
+                  sub_question_type: e.target.value ? Number(e.target.value) : "",
+                })
+              }
+            >
+              <option value="">Select subquestion type</option>
+              {questionTypes.map((qt) => (
+                <option key={`sub-question-type-${qt.question_type_id}`} value={qt.question_type_id}>
+                  {qt.description.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Question Type */}
@@ -231,12 +307,14 @@ export default function QuestionModal({
                 const nextChoices = Array.isArray(options)
                   ? options.map((opt, idx) => ({
                       option: opt?.option ?? "",
+                      report_verbiage: opt?.report_verbiage ?? "",
                       value: Number(opt?.value ?? 0),
                       order: Number(opt?.order ?? idx + 1),
                     }))
                   : options && typeof options === "object"
                     ? Object.entries(options).map(([option, value], idx) => ({
                         option,
+                        report_verbiage: "",
                         value: Number(value ?? 0),
                         order: idx + 1,
                       }))
@@ -326,13 +404,14 @@ export default function QuestionModal({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 90px 90px 40px",
+                gridTemplateColumns: "3fr 1fr 90px 90px 40px",
                 fontSize: "0.8rem",
                 color: "#666",
                 padding: "6px 0",
               }}
             >
               <div>Option</div>
+              <div>Report Verbiage</div>
               <div style={{ textAlign: "center" }}>Value</div>
               <div style={{ textAlign: "center" }}>Order</div>
               <div />
@@ -347,7 +426,7 @@ export default function QuestionModal({
                     key={`choice-${originalIndex}-${idx}`}
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr 90px 90px 40px",
+                      gridTemplateColumns: "3fr 1fr 90px 90px 40px",
                         gap: "8px",
                         marginBottom: "8px",
                     }}
@@ -371,6 +450,20 @@ export default function QuestionModal({
                         };
                         setEditingQuestion({ ...editingQuestion, choices: next });
                         }}
+                    />
+
+
+                    <input
+                      style={inputStyle}
+                      value={r.report_verbiage ?? ""}
+                      onChange={(e) => {
+                      const next = [...editingQuestion.choices];
+                      next[originalIndex] = {
+                        ...next[originalIndex],
+                        report_verbiage: e.target.value,
+                      };
+                      setEditingQuestion({ ...editingQuestion, choices: next });
+                      }}
                     />
 
 
@@ -445,6 +538,7 @@ export default function QuestionModal({
                         ...editingQuestion.choices,
                         {
                         option: "",
+                        report_verbiage: "",
                         value: 0,
                         order: editingQuestion.choices.length + 1,
                         },

@@ -3,12 +3,43 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import QuestionModal from "./QuestionModal";
 import RunAssessment from "./RunAssessment";
+import CognitrackXReportExample from "./CognitrackXReportExample";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { apiRequest } from "../api";
 import { replacePatientText, shouldUseClientTerminology } from "../uiTerminology";
 
 // Font Awesome
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEye, faEdit, faTrash, faChevronDown, faChevronRight  } from "@fortawesome/free-solid-svg-icons";
+
+const calculationRuleFieldOrder = ["rule_id", "type", "qid_1", "qid_2"];
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const renderHighlightedDescriptionText = (text, labels) => {
+  const normalizedText = String(text ?? "");
+  const filteredLabels = Array.from(
+    new Set(
+      (labels || [])
+        .map((label) => String(label ?? "").trim())
+        .filter(Boolean)
+        .sort((left, right) => right.length - left.length)
+    )
+  );
+
+  if (!normalizedText || !filteredLabels.length) {
+    return normalizedText;
+  }
+
+  const matcher = new RegExp(`(${filteredLabels.map(escapeRegExp).join("|")})`, "ig");
+  const parts = normalizedText.split(matcher);
+
+  return parts.map((part, index) => {
+    const isMatch = filteredLabels.some((label) => label.toLowerCase() === part.toLowerCase());
+    return isMatch ? <strong key={`highlight-${index}`}>{part}</strong> : part;
+  });
+};
 
 function AssessmentDetails() {
   const useClientTerminology = shouldUseClientTerminology();
@@ -42,10 +73,17 @@ function AssessmentDetails() {
   const [expandedSections, setExpandedSections] = useState(() => new Set());
   const [isEditAssessmentOpen, setIsEditAssessmentOpen] = useState(false);
   const [isRunAssessmentOpen, setIsRunAssessmentOpen] = useState(false);
+  const [isExampleReportOpen, setIsExampleReportOpen] = useState(false);
+  const [isDownloadingExampleReport, setIsDownloadingExampleReport] = useState(false);
   const [runStartQuestionSectionId, setRunStartQuestionSectionId] = useState(null);
   const [runStartQuestionId, setRunStartQuestionId] = useState(null);
   const [runForceConditionalSourceQuestionId, setRunForceConditionalSourceQuestionId] = useState(null);
   const [runForceConditionalTargetSectionId, setRunForceConditionalTargetSectionId] = useState(null);
+  const [isCalculationRuleModalOpen, setIsCalculationRuleModalOpen] = useState(false);
+  const [calculationRuleDraft, setCalculationRuleDraft] = useState(null);
+  const [savingCalculationRule, setSavingCalculationRule] = useState(false);
+  const [activeCalculationRuleQuestionTitle, setActiveCalculationRuleQuestionTitle] = useState("");
+  const [calculationRuleOptions, setCalculationRuleOptions] = useState([]);
   const [editAssessmentData, setEditAssessmentData] = useState({
     name: "",
     description: "",
@@ -64,6 +102,7 @@ function AssessmentDetails() {
   const [conditionalSectionQuestions, setConditionalSectionQuestions] = useState({});
   const [conditionalCreateCardHeights, setConditionalCreateCardHeights] = useState({});
   const normalFlowCardRefs = useRef({});
+  const exampleReportRef = useRef(null);
 
 
 
@@ -92,6 +131,94 @@ function AssessmentDetails() {
     color: "#007bff", // strong blue
   };
 
+  const addToTotalPillStyle = {
+    marginLeft: "10px",
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "3px 10px",
+    borderRadius: "999px",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    letterSpacing: "0.01em",
+    whiteSpace: "nowrap",
+    verticalAlign: "middle",
+  };
+
+  const calculatedValuePillStyle = {
+    ...addToTotalPillStyle,
+    background: "#e0f2fe",
+    color: "#0369a1",
+  };
+
+  const mergeQuestionSectionFlagsIntoAssessmentDetails = (assessmentData, questionSectionRows) => {
+    if (!assessmentData?.sections || !Array.isArray(questionSectionRows)) {
+      return assessmentData;
+    }
+
+    const questionSectionById = new Map(
+      questionSectionRows
+        .map((row) => [Number(row?.question_section_id), row])
+        .filter(([questionSectionId]) => Number.isFinite(questionSectionId) && questionSectionId > 0)
+    );
+
+    return {
+      ...assessmentData,
+      sections: assessmentData.sections.map((sectionWrapper) => ({
+        ...sectionWrapper,
+        section: {
+          ...sectionWrapper.section,
+          questions: (sectionWrapper.section?.questions || []).map((questionSection) => {
+            const mergedRow = questionSectionById.get(Number(questionSection?.question_section_id));
+            if (!mergedRow) return questionSection;
+
+            return {
+              ...questionSection,
+              include_sum_total:
+                mergedRow?.include_sum_total ??
+                mergedRow?.question_section?.include_sum_total ??
+                questionSection?.include_sum_total,
+              unique_calculation:
+                mergedRow?.unique_calculation ??
+                mergedRow?.question_section?.unique_calculation ??
+                questionSection?.unique_calculation,
+              rule_id:
+                mergedRow?.rule_id ??
+                mergedRow?.question_section?.rule_id ??
+                questionSection?.rule_id,
+            };
+          }),
+        },
+      })),
+    };
+  };
+
+  const mergeAssessmentCalculationRulesIntoDetails = (assessmentData, assessmentRow) => {
+    if (!assessmentData) return assessmentData;
+
+    const calculationRules =
+      assessmentRow?.calculation_rules ??
+      assessmentRow?.assessment?.calculation_rules ??
+      assessmentData?.calculation_rules ??
+      assessmentData?.assessment?.calculation_rules;
+
+    if (calculationRules === undefined) {
+      return assessmentData;
+    }
+
+    return {
+      ...assessmentData,
+      calculation_rules: calculationRules,
+      assessment: assessmentData?.assessment
+        ? {
+            ...assessmentData.assessment,
+            calculation_rules: calculationRules,
+          }
+        : assessmentData.assessment,
+    };
+  };
+
   useEffect(() => {
     const fetchAssessmentDetails = async () => {
       setLoading(true);
@@ -99,11 +226,34 @@ function AssessmentDetails() {
       const url =
         process.env.REACT_APP_API_URL_BASE +
         `/api/assessments-detail/${id}/`;
+      const assessmentUrl =
+        process.env.REACT_APP_API_URL_BASE +
+        `/api/assessments/${id}/`;
+      const questionSectionsUrl =
+        process.env.REACT_APP_API_URL_BASE +
+        `/api/question-sections/`;
 
       try {
-        const res = await apiRequest(url);
+        const [res, assessmentRes, questionSectionsRes] = await Promise.all([
+          apiRequest(url),
+          apiRequest(assessmentUrl),
+          apiRequest(questionSectionsUrl),
+        ]);
         const data = await res.json();
-        setAssessmentDetails(data);
+        const assessmentRow = assessmentRes.ok ? await assessmentRes.json() : null;
+        const questionSectionData = questionSectionsRes.ok
+          ? await questionSectionsRes.json()
+          : [];
+
+        setAssessmentDetails(
+          mergeAssessmentCalculationRulesIntoDetails(
+            mergeQuestionSectionFlagsIntoAssessmentDetails(
+              data,
+              Array.isArray(questionSectionData) ? questionSectionData : []
+            ),
+            assessmentRow
+          )
+        );
       } catch (err) {
         console.error("Error fetching assessment details:", err);
       } finally {
@@ -151,9 +301,35 @@ function AssessmentDetails() {
       }
     };
 
+    const fetchCalculationRuleOptions = async () => {
+      try {
+        const res = await apiRequest(
+          `${process.env.REACT_APP_API_URL_BASE}/api/calculation-rules/`
+        );
+
+        if (!res.ok) {
+          setCalculationRuleOptions([]);
+          return;
+        }
+
+        const data = await res.json();
+        const rows = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.results)
+            ? data.results
+            : [];
+
+        setCalculationRuleOptions(rows);
+      } catch (err) {
+        console.error("Error fetching calculation rules:", err);
+        setCalculationRuleOptions([]);
+      }
+    };
+
     fetchAssessmentDetails();
     fetchQuestionFlowRules();
     fetchConditionalSections();
+    fetchCalculationRuleOptions();
 
     apiRequest(`${process.env.REACT_APP_API_URL_BASE}/api/question-types/`)
       .then((res) => res.json())
@@ -358,6 +534,96 @@ function AssessmentDetails() {
     return `${option} = ${value}`;
   };
 
+  const calculationRuleFieldEntries = useMemo(() => {
+    if (!calculationRuleDraft || typeof calculationRuleDraft !== "object") return [];
+
+    const draftKeys = Object.keys(calculationRuleDraft);
+    return draftKeys
+      .slice()
+      .sort((left, right) => {
+        const leftIndex = calculationRuleFieldOrder.indexOf(left);
+        const rightIndex = calculationRuleFieldOrder.indexOf(right);
+
+        if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+      })
+      .map((fieldName) => ({
+        fieldName,
+        value: calculationRuleDraft[fieldName],
+      }));
+  }, [calculationRuleDraft]);
+
+  const selectedCalculationRuleOption = useMemo(() => {
+    const selectedType = String(calculationRuleDraft?.type ?? "").trim();
+    if (!selectedType) return null;
+
+    return (
+      calculationRuleOptions.find(
+        (option) => String(option?.calculation_key ?? "").trim() === selectedType
+      ) || null
+    );
+  }, [calculationRuleDraft, calculationRuleOptions]);
+
+  const calculationRuleQuestionOptions = useMemo(() => {
+    const optionsByQuestionId = new Map();
+
+    const appendQuestionSection = (questionSection) => {
+      const questionId = Number(
+        questionSection?.question?.question_id ??
+        questionSection?.question_id ??
+        questionSection?.question_section?.question_id ??
+        0
+      );
+      const title = String(
+        questionSection?.question?.title ??
+        questionSection?.title ??
+        questionSection?.question_section?.question?.title ??
+        ""
+      ).trim();
+
+      if (!Number.isFinite(questionId) || questionId <= 0 || !title) return;
+      if (optionsByQuestionId.has(questionId)) return;
+
+      optionsByQuestionId.set(questionId, {
+        value: questionId,
+        label: title,
+      });
+    };
+
+    (assessmentDetails?.sections || []).forEach((sectionWrapper) => {
+      (sectionWrapper?.section?.questions || []).forEach(appendQuestionSection);
+    });
+
+    Object.values(conditionalSectionQuestions || {}).forEach((questionSections) => {
+      (questionSections || []).forEach(appendQuestionSection);
+    });
+
+    return Array.from(optionsByQuestionId.values()).sort((left, right) =>
+      left.label.localeCompare(right.label, undefined, { sensitivity: "base" })
+    );
+  }, [assessmentDetails, conditionalSectionQuestions]);
+
+  const calculationRuleDescriptionLabels = useMemo(() => {
+    const labels = ["Rule Type", "Question 1", "Question 2"];
+
+    const selectedQuestion1Id = Number(calculationRuleDraft?.qid_1 ?? 0);
+    const selectedQuestion2Id = Number(calculationRuleDraft?.qid_2 ?? 0);
+
+    const selectedQuestion1 = calculationRuleQuestionOptions.find(
+      (option) => option.value === selectedQuestion1Id
+    );
+    const selectedQuestion2 = calculationRuleQuestionOptions.find(
+      (option) => option.value === selectedQuestion2Id
+    );
+
+    if (selectedQuestion1?.label) labels.push(selectedQuestion1.label);
+    if (selectedQuestion2?.label) labels.push(selectedQuestion2.label);
+
+    return labels;
+  }, [calculationRuleDraft, calculationRuleQuestionOptions]);
+
   if (loading || !assessmentDetails) {
     return (
       <div style={{ padding: "40px", textAlign: "center" }}>
@@ -372,7 +638,11 @@ function AssessmentDetails() {
     questionSectionId,
     sectionId,
     questionOrder,
-    isRequired
+    isRequired,
+    includeSumTotal,
+    uniqueCalculation,
+    hasSubquestion,
+    subQuestionType
   ) => {
     try {
       // Load question
@@ -416,6 +686,15 @@ function AssessmentDetails() {
         section_id: sectionId,
         question_order: normalizedQuestionOrder,
         is_required: normalizedIsRequired,
+        include_sum_total: Boolean(includeSumTotal),
+        unique_calculation: Boolean(uniqueCalculation),
+        has_subquestion: Boolean(hasSubquestion),
+        sub_question_type: (() => {
+          const parsedSubQuestionType = Number(subQuestionType);
+          return Number.isFinite(parsedSubQuestionType) && parsedSubQuestionType > 0
+            ? parsedSubQuestionType
+            : "";
+        })(),
         title: questionData.title,
         question: questionData.question,
         hyperlink: questionData.hyperlink || "",
@@ -426,11 +705,13 @@ function AssessmentDetails() {
         choices: questionData.use_default_options
           ? (questionData.question_type.options || []).map((opt) => ({
               option: opt.option,
+              report_verbiage: opt.report_verbiage ?? "",
               value: opt.value,
               order: opt.order,
             }))
           : (questionData.choices || []).map((c) => ({
               option: c.option,
+              report_verbiage: c.report_verbiage ?? "",
               value: c.value,
               order: c.order,
             })),
@@ -618,6 +899,19 @@ function AssessmentDetails() {
     const resolvedIsRequired = Boolean(
       questionSectionData?.is_required ?? newQuestion?.is_required ?? false
     );
+    const resolvedIncludeSumTotal = Boolean(
+      questionSectionData?.include_sum_total ?? newQuestion?.include_sum_total ?? false
+    );
+    const resolvedUniqueCalculation = Boolean(
+      questionSectionData?.unique_calculation ?? newQuestion?.unique_calculation ?? false
+    );
+    const resolvedHasSubquestion = Boolean(
+      questionSectionData?.has_subquestion ?? newQuestion?.has_subquestion ?? false
+    );
+    const resolvedSubQuestionType =
+      questionSectionData?.sub_question_type ??
+      newQuestion?.sub_question_type ??
+      null;
 
     setAssessmentDetails((prev) => ({
       ...prev,
@@ -633,6 +927,10 @@ function AssessmentDetails() {
                     question_section_id: resolvedQuestionSectionId,
                     question_order: resolvedQuestionOrder,
                     is_required: resolvedIsRequired,
+                    include_sum_total: resolvedIncludeSumTotal,
+                    unique_calculation: resolvedUniqueCalculation,
+                    has_subquestion: resolvedHasSubquestion,
+                    sub_question_type: resolvedSubQuestionType,
                     question: {
                       ...newQuestion,
                       question_type: hydratedQuestionType, // ✅ THIS is the fix
@@ -670,7 +968,16 @@ function AssessmentDetails() {
     });
   };
 
-    const updateQuestionSectionRequiredInState = (questionSectionId, isRequired) => {
+    const updateQuestionSectionFlagsInState = (
+      questionSectionId,
+      {
+        isRequired,
+        includeSumTotal,
+        uniqueCalculation,
+        hasSubquestion,
+        subQuestionType,
+      }
+    ) => {
       setAssessmentDetails((prev) => {
         if (!prev) return prev;
 
@@ -685,12 +992,39 @@ function AssessmentDetails() {
                   ? {
                       ...qs,
                       is_required: Boolean(isRequired),
+                      include_sum_total: Boolean(includeSumTotal),
+                      unique_calculation: Boolean(uniqueCalculation),
+                      has_subquestion: Boolean(hasSubquestion),
+                      sub_question_type: subQuestionType ?? null,
                     }
                   : qs
               ),
             },
           })),
         };
+      });
+
+      setConditionalSectionQuestions((prev) => {
+        if (!prev) return prev;
+
+        const nextEntries = Object.entries(prev).map(([sectionId, questions]) => {
+          const nextQuestions = (questions || []).map((questionSection) =>
+            questionSection.question_section_id === questionSectionId
+              ? {
+                  ...questionSection,
+                  is_required: Boolean(isRequired),
+                  include_sum_total: Boolean(includeSumTotal),
+                  unique_calculation: Boolean(uniqueCalculation),
+                  has_subquestion: Boolean(hasSubquestion),
+                  sub_question_type: subQuestionType ?? null,
+                }
+              : questionSection
+          );
+
+          return [sectionId, nextQuestions];
+        });
+
+        return Object.fromEntries(nextEntries);
       });
     };
 
@@ -754,6 +1088,19 @@ function AssessmentDetails() {
       is_required: Boolean(
         questionSectionData?.is_required ?? isRequired ?? false
       ),
+      include_sum_total: Boolean(
+        questionSectionData?.include_sum_total ?? newQuestion?.include_sum_total ?? false
+      ),
+      unique_calculation: Boolean(
+        questionSectionData?.unique_calculation ?? newQuestion?.unique_calculation ?? false
+      ),
+      has_subquestion: Boolean(
+        questionSectionData?.has_subquestion ?? newQuestion?.has_subquestion ?? false
+      ),
+      sub_question_type:
+        questionSectionData?.sub_question_type ??
+        newQuestion?.sub_question_type ??
+        null,
       question: {
         ...newQuestion,
         question_type: hydratedQuestionType,
@@ -820,6 +1167,135 @@ const isQuestionRequired = (questionSection) => {
   return false;
 };
 
+const getQuestionSectionBoolean = (questionSection, fieldName) => {
+  const rawValue =
+    questionSection?.[fieldName] ??
+    questionSection?.question_section?.[fieldName] ??
+    false;
+
+  if (typeof rawValue === "boolean") return rawValue;
+  if (typeof rawValue === "number") return rawValue === 1;
+  if (typeof rawValue === "string") {
+    const normalized = rawValue.trim().toLowerCase();
+    return normalized === "true" || normalized === "1";
+  }
+
+  return false;
+};
+
+const getQuestionSectionForeignKeyId = (questionSection, fieldName) => {
+  const rawValue =
+    questionSection?.[fieldName] ??
+    questionSection?.question_section?.[fieldName] ??
+    null;
+
+  if (rawValue && typeof rawValue === "object") {
+    const nestedId =
+      rawValue?.question_type_id ??
+      rawValue?.id ??
+      rawValue?.value ??
+      null;
+    const parsedNestedId = Number(nestedId);
+    return Number.isFinite(parsedNestedId) && parsedNestedId > 0
+      ? parsedNestedId
+      : null;
+  }
+
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getQuestionSectionRuleId = (questionSection) => {
+  const rawValue =
+    questionSection?.rule_id ??
+    questionSection?.question_section?.rule_id ??
+    null;
+
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getAssessmentCalculationRules = (assessment) => {
+  const normalizeCalculationRulesValue = (value, depth = 0) => {
+    if (depth > 3 || value === null || value === undefined) return [];
+
+    if (Array.isArray(value)) return value;
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+
+      try {
+        return normalizeCalculationRulesValue(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return [];
+      }
+    }
+
+    if (typeof value === "object") {
+      if (Array.isArray(value?.results)) {
+        return normalizeCalculationRulesValue(value.results, depth + 1);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(value, "calculation_rules")) {
+        return normalizeCalculationRulesValue(value.calculation_rules, depth + 1);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(value, "rule_id")) {
+        return [value];
+      }
+
+      const objectValues = Object.values(value);
+      const looksLikeRuleMap = objectValues.every(
+        (entry) => entry && typeof entry === "object" && Object.prototype.hasOwnProperty.call(entry, "rule_id")
+      );
+
+      if (looksLikeRuleMap) {
+        return objectValues;
+      }
+    }
+
+    return [];
+  };
+
+  const candidates = [
+    assessment?.calculation_rules,
+    assessment?.assessment?.calculation_rules,
+    assessment?.assessment_detail?.calculation_rules,
+    assessment?.assessment_data?.calculation_rules,
+    assessment,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeCalculationRulesValue(candidate);
+    if (normalized.length) {
+      return normalized;
+    }
+  }
+
+  return [];
+};
+
+const sanitizeCalculationRuleDraft = (draft) => {
+  if (!draft || typeof draft !== "object") return null;
+
+  return Object.entries(draft).reduce((accumulator, [fieldName, value]) => {
+    if (fieldName === "type") {
+      accumulator[fieldName] = String(value ?? "");
+      return accumulator;
+    }
+
+    if (fieldName === "rule_id" || /^qid_\d+$/i.test(fieldName)) {
+      const trimmed = String(value ?? "").trim();
+      accumulator[fieldName] = trimmed === "" ? null : Number(trimmed);
+      return accumulator;
+    }
+
+    accumulator[fieldName] = value;
+    return accumulator;
+  }, {});
+};
+
 const compareQuestionOrder = (left, right) => {
   const leftOrder = getQuestionOrderValue(left);
   const rightOrder = getQuestionOrderValue(right);
@@ -864,6 +1340,146 @@ const compareQuestionOrder = (left, right) => {
       is_active: assessmentIsActive,
     });
     setIsEditAssessmentOpen(true);
+  };
+
+  const closeCalculationRuleModal = () => {
+    setIsCalculationRuleModalOpen(false);
+    setCalculationRuleDraft(null);
+    setActiveCalculationRuleQuestionTitle("");
+  };
+
+  const openCalculationRuleModal = (questionSection, questionTitle) => {
+    const ruleId = getQuestionSectionRuleId(questionSection);
+    if (ruleId === null) return;
+
+    const normalizedCalculationRules = getAssessmentCalculationRules(assessmentDetails);
+    const matchingRule = normalizedCalculationRules.find(
+      (rule) => Number(rule?.rule_id) === ruleId
+    );
+
+    setCalculationRuleDraft(
+      matchingRule && typeof matchingRule === "object"
+        ? { ...matchingRule }
+        : {
+            rule_id: ruleId,
+            type: "",
+            qid_1: "",
+            qid_2: "",
+          }
+    );
+    setActiveCalculationRuleQuestionTitle(questionTitle || "");
+    setIsCalculationRuleModalOpen(true);
+  };
+
+  const handleCalculationRuleFieldChange = (fieldName, value) => {
+    setCalculationRuleDraft((prev) => ({
+      ...(prev || {}),
+      [fieldName]: fieldName === "rule_id" || /^qid_\d+$/i.test(fieldName)
+        ? value
+        : value,
+    }));
+  };
+
+  const handleSaveCalculationRule = async () => {
+    const sanitizedRule = sanitizeCalculationRuleDraft(calculationRuleDraft);
+    const normalizedRuleId = Number(sanitizedRule?.rule_id);
+
+    if (!Number.isFinite(normalizedRuleId)) return;
+
+    setSavingCalculationRule(true);
+
+    try {
+      const existingRules = getAssessmentCalculationRules(assessmentDetails);
+      const existingIndex = existingRules.findIndex(
+        (rule) => Number(rule?.rule_id) === normalizedRuleId
+      );
+      const nextRules = existingIndex >= 0
+        ? existingRules.map((rule, index) => (index === existingIndex ? sanitizedRule : rule))
+        : [...existingRules, sanitizedRule];
+
+      let response = await apiRequest(
+        `${process.env.REACT_APP_API_URL_BASE}/api/assessments/${id}/`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ calculation_rules: nextRules }),
+        }
+      );
+
+      if (!response.ok && response.status === 405) {
+        response = await apiRequest(
+          `${process.env.REACT_APP_API_URL_BASE}/api/assessments/${id}/`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: assessmentDetails?.name ?? "",
+              description: assessmentDetails?.description ?? "",
+              patient_instructions: assessmentDetails?.patient_instructions ?? "",
+              patient_title: assessmentDetails?.patient_title ?? "",
+              is_active: assessmentIsActive,
+              calculation_rules: nextRules,
+            }),
+          }
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(`Update calculation rules failed with status ${response.status}`);
+      }
+
+      const updated = await response.json();
+      const updatedRules = getAssessmentCalculationRules(updated).length
+        ? getAssessmentCalculationRules(updated)
+        : nextRules;
+
+      setAssessmentDetails((prev) => ({
+        ...prev,
+        ...updated,
+        calculation_rules: updatedRules,
+        assessment: prev?.assessment
+          ? {
+              ...prev.assessment,
+              ...(updated?.assessment || {}),
+              calculation_rules: updatedRules,
+            }
+          : updated?.assessment,
+      }));
+      closeCalculationRuleModal();
+    } catch (err) {
+      console.error("Failed to save calculation rule", err);
+    } finally {
+      setSavingCalculationRule(false);
+    }
+  };
+
+  const renderCalculatedValuePill = (questionSection, questionTitle) => {
+    if (!getQuestionSectionBoolean(questionSection, "unique_calculation")) {
+      return null;
+    }
+
+    const ruleId = getQuestionSectionRuleId(questionSection);
+
+    return (
+      <button
+        type="button"
+        style={{
+          ...calculatedValuePillStyle,
+          border: "none",
+          cursor: ruleId === null ? "not-allowed" : "pointer",
+          fontFamily: "inherit",
+        }}
+        title={
+          ruleId === null
+            ? "This question section does not have a rule_id yet."
+            : `Edit calculation rule ${ruleId}`
+        }
+        onClick={() => openCalculationRuleModal(questionSection, questionTitle)}
+        disabled={ruleId === null}
+      >
+        Calculated Value
+      </button>
+    );
   };
 
   const handleSaveAssessmentDetails = async () => {
@@ -917,6 +1533,47 @@ const compareQuestionOrder = (left, right) => {
       console.error("Failed to save assessment details", err);
     } finally {
       setSavingAssessmentDetails(false);
+    }
+  };
+
+  const handleDownloadExampleReportPdf = async () => {
+    const reportElement = exampleReportRef.current;
+    if (!reportElement || isDownloadingExampleReport) return;
+
+    setIsDownloadingExampleReport(true);
+
+    try {
+      const canvas = await html2canvas(reportElement, {
+        scale: 1.5,
+        useCORS: true,
+        backgroundColor: "#0b1220",
+        logging: false,
+        windowWidth: reportElement.scrollWidth,
+        windowHeight: reportElement.scrollHeight,
+      });
+
+      const basePdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = basePdf.internal.pageSize.getWidth();
+      const renderedHeightMm = (canvas.height / canvas.width) * pageWidth;
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageWidth, renderedHeightMm] });
+      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+
+      pdf.setFillColor(11, 18, 32);
+      pdf.rect(0, 0, pageWidth, renderedHeightMm, "F");
+      pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, renderedHeightMm);
+
+      const assessmentName =
+        String(assessmentDetails?.name || "CognitrackX_Example_Report")
+          .trim()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-zA-Z0-9_-]/g, "") || "CognitrackX_Example_Report";
+      const dateStamp = new Date().toISOString().slice(0, 10);
+
+      pdf.save(`${assessmentName}_${dateStamp}.pdf`);
+    } catch (error) {
+      console.error("Failed to download example report PDF", error);
+    } finally {
+      setIsDownloadingExampleReport(false);
     }
   };
 
@@ -979,7 +1636,16 @@ const compareQuestionOrder = (left, right) => {
           {assessmentDetails.name} Details
         </h1>
 
-        <div style={{ textAlign: "center", marginBottom: "16px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: "12px",
+            marginBottom: "16px",
+            flexWrap: "wrap",
+          }}
+        >
           <button
             onClick={() => {
               setRunStartQuestionSectionId(null);
@@ -999,6 +1665,20 @@ const compareQuestionOrder = (left, right) => {
             }}
           >
             Run This Assessment
+          </button>
+          <button
+            onClick={() => setIsExampleReportOpen(true)}
+            style={{
+              padding: "8px 16px",
+              background: "#0f172a",
+              color: "#fff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: 400,
+            }}
+          >
+            Example Report
           </button>
         </div>
 
@@ -1431,6 +2111,13 @@ const compareQuestionOrder = (left, right) => {
                               *
                             </span>
                           )}
+                          {getQuestionSectionBoolean(qs, "include_sum_total") && (
+                            <span style={addToTotalPillStyle}>Add to Total</span>
+                          )}
+                          {getQuestionSectionBoolean(qs, "has_subquestion") && (
+                            <span style={addToTotalPillStyle}>Has Subquestion</span>
+                          )}
+                          {renderCalculatedValuePill(qs, qs.question.title)}
                           {isCurrentQuestionConditional && (
                             <span style={{ marginLeft: "10px", color: "#4b5563", fontWeight: 500 }}>
                               {currentFlowRuleCondition
@@ -1464,7 +2151,11 @@ const compareQuestionOrder = (left, right) => {
                                 qs.question_section_id,
                                 section.section_id,
                                 qs.question_order,
-                                qs?.is_required ?? qs?.question_section?.is_required ?? false
+                                qs?.is_required ?? qs?.question_section?.is_required ?? false,
+                                getQuestionSectionBoolean(qs, "include_sum_total"),
+                                getQuestionSectionBoolean(qs, "unique_calculation"),
+                                getQuestionSectionBoolean(qs, "has_subquestion"),
+                                getQuestionSectionForeignKeyId(qs, "sub_question_type")
                               )
                             }
                           />
@@ -1655,6 +2346,16 @@ const compareQuestionOrder = (left, right) => {
                                       *
                                     </span>
                                   )}
+                                  {getQuestionSectionBoolean(flowQuestionForRow, "include_sum_total") && (
+                                    <span style={addToTotalPillStyle}>Add to Total</span>
+                                  )}
+                                  {getQuestionSectionBoolean(flowQuestionForRow, "has_subquestion") && (
+                                    <span style={addToTotalPillStyle}>Has Subquestion</span>
+                                  )}
+                                  {renderCalculatedValuePill(
+                                    flowQuestionForRow,
+                                    flowQuestionForRow?.question?.title || "Question Title"
+                                  )}
                                 </strong>
                               </div>
 
@@ -1701,7 +2402,11 @@ const compareQuestionOrder = (left, right) => {
                                       flowQuestionForRow.question_section_id,
                                       targetSectionId,
                                       flowQuestionForRow.question_order,
-                                      flowQuestionForRow?.is_required ?? flowQuestionForRow?.question_section?.is_required ?? false
+                                      flowQuestionForRow?.is_required ?? flowQuestionForRow?.question_section?.is_required ?? false,
+                                      getQuestionSectionBoolean(flowQuestionForRow, "include_sum_total"),
+                                      getQuestionSectionBoolean(flowQuestionForRow, "unique_calculation"),
+                                      getQuestionSectionBoolean(flowQuestionForRow, "has_subquestion"),
+                                      getQuestionSectionForeignKeyId(flowQuestionForRow, "sub_question_type")
                                     )
                                   }
                                 />
@@ -1872,6 +2577,10 @@ const compareQuestionOrder = (left, right) => {
                                   section_id: targetSectionId,
                                   question_order: nextConditionalFlowOrder,
                                   is_required: true,
+                                  include_sum_total: false,
+                                  unique_calculation: false,
+                                  has_subquestion: false,
+                                  sub_question_type: "",
                                   title: "",
                                   question: "",
                                   hyperlink: "",
@@ -2024,6 +2733,16 @@ const compareQuestionOrder = (left, right) => {
                                     *
                                   </span>
                                 )}
+                                {getQuestionSectionBoolean(flowQ, "include_sum_total") && (
+                                  <span style={addToTotalPillStyle}>Add to Total</span>
+                                )}
+                                {getQuestionSectionBoolean(flowQ, "has_subquestion") && (
+                                  <span style={addToTotalPillStyle}>Has Subquestion</span>
+                                )}
+                                {renderCalculatedValuePill(
+                                  flowQ,
+                                  flowQ?.question?.title || "Question Title"
+                                )}
                               </strong>
                             </div>
 
@@ -2072,7 +2791,11 @@ const compareQuestionOrder = (left, right) => {
                                     flowQ.question_section_id,
                                     lastConditionalSourceInfo?.targetSectionId,
                                     flowQ.question_order,
-                                    flowQ?.is_required ?? flowQ?.question_section?.is_required ?? false
+                                    flowQ?.is_required ?? flowQ?.question_section?.is_required ?? false,
+                                    getQuestionSectionBoolean(flowQ, "include_sum_total"),
+                                    getQuestionSectionBoolean(flowQ, "unique_calculation"),
+                                    getQuestionSectionBoolean(flowQ, "has_subquestion"),
+                                    getQuestionSectionForeignKeyId(flowQ, "sub_question_type")
                                   )
                                 }
                               />
@@ -2268,6 +2991,10 @@ const compareQuestionOrder = (left, right) => {
                                       ))
                                     ) + 1,
                                   is_required: true,
+                                    include_sum_total: false,
+                                    unique_calculation: false,
+                                    has_subquestion: false,
+                                    sub_question_type: "",
                                   title: "",
                                   question: "",
                                   hyperlink: "",
@@ -2367,6 +3094,10 @@ const compareQuestionOrder = (left, right) => {
                         section_id: section.section_id,
                         question_order: nextOrder,
                         is_required: true,
+                        include_sum_total: false,
+                        unique_calculation: false,
+                        has_subquestion: false,
+                        sub_question_type: "",
                         title: "",
                         question: "",
                         hyperlink: "",
@@ -2541,6 +3272,269 @@ const compareQuestionOrder = (left, right) => {
                 >
                   {savingAssessmentDetails ? "Saving..." : "Save"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isCalculationRuleModalOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.42)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "24px 16px",
+              zIndex: 1360,
+            }}
+          >
+            <div
+              style={{
+                background: "#fff",
+                width: "560px",
+                maxWidth: "calc(100vw - 32px)",
+                borderRadius: "16px",
+                overflow: "hidden",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
+              }}
+            >
+              <div
+                style={{
+                  padding: "20px 24px 18px",
+                  background: "linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%)",
+                  borderBottom: "1px solid #e2e8f0",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "16px",
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: 0, color: "#0f172a" }}>Edit Calculated Value Rule</h3>
+                    <p style={{ margin: "6px 0 0", color: "#475569", fontSize: "0.95rem" }}>
+                      Update the calculation logic tied to this question.
+                    </p>
+                  </div>
+                  {calculationRuleDraft?.rule_id !== undefined && calculationRuleDraft?.rule_id !== null && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "6px 10px",
+                        borderRadius: "999px",
+                        background: "#dbeafe",
+                        color: "#1d4ed8",
+                        fontSize: "0.76rem",
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      rule_id: {calculationRuleDraft.rule_id}
+                    </span>
+                  )}
+                </div>
+                {activeCalculationRuleQuestionTitle && (
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      padding: "10px 12px",
+                      borderRadius: "12px",
+                      background: "rgba(255,255,255,0.9)",
+                      border: "1px solid #dbeafe",
+                      color: "#334155",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {activeCalculationRuleQuestionTitle}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ padding: "22px 24px 24px" }}>
+                {calculationRuleFieldEntries.map(({ fieldName, value }) => {
+                  if (fieldName === "rule_id") {
+                    return null;
+                  }
+
+                  const isNumericField = /^qid_\d+$/i.test(fieldName);
+                  const isRuleTypeField = fieldName === "type";
+                  const isQuestionReferenceField = fieldName === "qid_1" || fieldName === "qid_2";
+                  const label = isRuleTypeField
+                    ? "Rule Type"
+                    : fieldName === "qid_1"
+                      ? "Question 1"
+                      : fieldName === "qid_2"
+                        ? "Question 2"
+                        : fieldName;
+
+                  return (
+                    <React.Fragment key={fieldName}>
+                      <div style={{ marginBottom: isRuleTypeField ? "14px" : "16px" }}>
+                        <label
+                          style={{
+                            display: "block",
+                            marginBottom: "6px",
+                            fontWeight: 700,
+                            fontSize: "0.9rem",
+                            color: "#334155",
+                          }}
+                        >
+                          {label}
+                        </label>
+                        {isRuleTypeField ? (
+                          <select
+                            value={value ?? ""}
+                            onChange={(e) => handleCalculationRuleFieldChange(fieldName, e.target.value)}
+                            style={{
+                              width: "100%",
+                              padding: "11px 12px",
+                              borderRadius: "10px",
+                              border: "1px solid #cbd5e1",
+                              background: "#fff",
+                              color: "#0f172a",
+                              fontSize: "0.95rem",
+                            }}
+                          >
+                            <option value="">Select a rule type</option>
+                            {calculationRuleOptions.map((option, index) => {
+                              const calculationKey = String(option?.calculation_key ?? "").trim();
+                              if (!calculationKey) return null;
+
+                              return (
+                                <option
+                                  key={`${calculationKey}-${index}`}
+                                  value={calculationKey}
+                                >
+                                  {calculationKey}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        ) : isQuestionReferenceField ? (
+                          <select
+                            value={value ?? ""}
+                            onChange={(e) => handleCalculationRuleFieldChange(fieldName, e.target.value)}
+                            style={{
+                              width: "100%",
+                              padding: "11px 12px",
+                              borderRadius: "10px",
+                              border: "1px solid #cbd5e1",
+                              background: "#fff",
+                              color: "#0f172a",
+                              fontSize: "0.95rem",
+                            }}
+                          >
+                            <option value="">Select a question</option>
+                            {calculationRuleQuestionOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={isNumericField ? "number" : "text"}
+                            value={value ?? ""}
+                            onChange={(e) => handleCalculationRuleFieldChange(fieldName, e.target.value)}
+                            style={{
+                              width: "100%",
+                              padding: "11px 12px",
+                              borderRadius: "10px",
+                              border: "1px solid #cbd5e1",
+                              background: "#fff",
+                              color: "#0f172a",
+                              fontSize: "0.95rem",
+                            }}
+                          />
+                        )}
+                      </div>
+
+                      {isRuleTypeField && (
+                        <div style={{ marginBottom: "16px" }}>
+                          <label
+                            style={{
+                              display: "block",
+                              marginBottom: "6px",
+                              fontWeight: 700,
+                              fontSize: "0.9rem",
+                              color: "#334155",
+                            }}
+                          >
+                            Description
+                          </label>
+                          <div
+                            style={{
+                              width: "100%",
+                              padding: "11px 12px",
+                              borderRadius: "10px",
+                              border: "1px solid #dbeafe",
+                              background: "#f8fafc",
+                              color: "#475569",
+                              lineHeight: 1.55,
+                              minHeight: "88px",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {renderHighlightedDescriptionText(
+                              selectedCalculationRuleOption?.description ?? "",
+                              calculationRuleDescriptionLabels
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "10px",
+                    marginTop: "8px",
+                    paddingTop: "18px",
+                    borderTop: "1px solid #e2e8f0",
+                  }}
+                >
+                  <button
+                    onClick={closeCalculationRuleModal}
+                    disabled={savingCalculationRule}
+                    style={{
+                      background: "#fff",
+                      color: "#334155",
+                      border: "1px solid #cbd5e1",
+                      padding: "9px 14px",
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    style={{
+                      background: "#007bff",
+                      color: "#fff",
+                      border: "none",
+                      padding: "9px 16px",
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      boxShadow: "0 10px 20px rgba(0, 123, 255, 0.18)",
+                    }}
+                    onClick={handleSaveCalculationRule}
+                    disabled={savingCalculationRule}
+                  >
+                    {savingCalculationRule ? "Saving..." : "Save"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2782,6 +3776,15 @@ const compareQuestionOrder = (left, right) => {
                         question_id: questionData.question_id,
                         question_order: normalizedQuestionOrder,
                         is_required: Boolean(editingQuestion.is_required),
+                        include_sum_total: Boolean(editingQuestion.include_sum_total),
+                        unique_calculation: Boolean(editingQuestion.unique_calculation),
+                        has_subquestion: Boolean(editingQuestion.has_subquestion),
+                        sub_question_type:
+                          Boolean(editingQuestion.has_subquestion) &&
+                          Number.isFinite(Number(editingQuestion.sub_question_type)) &&
+                          Number(editingQuestion.sub_question_type) > 0
+                            ? Number(editingQuestion.sub_question_type)
+                            : null,
                       }),
                     }
                   );
@@ -2873,6 +3876,15 @@ const compareQuestionOrder = (left, right) => {
                         body: JSON.stringify({
                           question_order: normalizedQuestionOrder,
                           is_required: Boolean(editingQuestion.is_required),
+                          include_sum_total: Boolean(editingQuestion.include_sum_total),
+                          unique_calculation: Boolean(editingQuestion.unique_calculation),
+                          has_subquestion: Boolean(editingQuestion.has_subquestion),
+                          sub_question_type:
+                            Boolean(editingQuestion.has_subquestion) &&
+                            Number.isFinite(Number(editingQuestion.sub_question_type)) &&
+                            Number(editingQuestion.sub_question_type) > 0
+                              ? Number(editingQuestion.sub_question_type)
+                              : null,
                         }),
                       }
                     );
@@ -2882,9 +3894,20 @@ const compareQuestionOrder = (left, right) => {
                       normalizedQuestionOrder
                     );
 
-                    updateQuestionSectionRequiredInState(
+                    updateQuestionSectionFlagsInState(
                       editingQuestion.question_section_id,
-                      editingQuestion.is_required
+                      {
+                        isRequired: editingQuestion.is_required,
+                        includeSumTotal: editingQuestion.include_sum_total,
+                        uniqueCalculation: editingQuestion.unique_calculation,
+                        hasSubquestion: editingQuestion.has_subquestion,
+                        subQuestionType:
+                          Boolean(editingQuestion.has_subquestion) &&
+                          Number.isFinite(Number(editingQuestion.sub_question_type)) &&
+                          Number(editingQuestion.sub_question_type) > 0
+                            ? Number(editingQuestion.sub_question_type)
+                            : null,
+                      }
                     );
 
                     if (!isMainAssessmentSection) {
@@ -2898,6 +3921,15 @@ const compareQuestionOrder = (left, right) => {
                                   ...flowQ,
                                   question_order: normalizedQuestionOrder,
                                   is_required: Boolean(editingQuestion.is_required),
+                                  include_sum_total: Boolean(editingQuestion.include_sum_total),
+                                  unique_calculation: Boolean(editingQuestion.unique_calculation),
+                                  has_subquestion: Boolean(editingQuestion.has_subquestion),
+                                  sub_question_type:
+                                    Boolean(editingQuestion.has_subquestion) &&
+                                    Number.isFinite(Number(editingQuestion.sub_question_type)) &&
+                                    Number(editingQuestion.sub_question_type) > 0
+                                      ? Number(editingQuestion.sub_question_type)
+                                      : null,
                                 }
                               : flowQ
                           )
@@ -3570,6 +4602,89 @@ const compareQuestionOrder = (left, right) => {
           forceConditionalSourceQuestionId={runForceConditionalSourceQuestionId}
           forceConditionalTargetSectionId={runForceConditionalTargetSectionId}
         />
+
+        {isExampleReportOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.56)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "20px",
+              zIndex: 1400,
+            }}
+          >
+            <div
+              style={{
+                width: "min(1280px, 100%)",
+                height: "min(92vh, 980px)",
+                background: "#ffffff",
+                borderRadius: "20px",
+                overflow: "hidden",
+                boxShadow: "0 30px 80px rgba(15, 23, 42, 0.32)",
+                border: "1px solid rgba(219, 234, 254, 0.8)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>Example Report</div>
+                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                    Previewing the CognitrackX redacted PDF example
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <button
+                    onClick={handleDownloadExampleReportPdf}
+                    disabled={isDownloadingExampleReport}
+                    style={{
+                      background: isDownloadingExampleReport ? "#cbd5e1" : "#0f172a",
+                      color: isDownloadingExampleReport ? "#475569" : "#ffffff",
+                      border: "1px solid #0f172a",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: isDownloadingExampleReport ? "not-allowed" : "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {isDownloadingExampleReport ? "Generating PDF..." : "Download PDF"}
+                  </button>
+                  <button
+                    onClick={() => setIsExampleReportOpen(false)}
+                    style={{
+                      background: "#fff",
+                      color: "#334155",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: "auto" }}>
+                <div ref={exampleReportRef}>
+                  <CognitrackXReportExample />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
 }

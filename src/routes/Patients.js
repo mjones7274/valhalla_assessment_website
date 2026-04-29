@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { FaSyncAlt, FaTrash } from "react-icons/fa";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
+import CognitrackXReport from "./CognitrackXReport";
 import { apiRequest } from "../api";
 import { getSelectedCompany } from "../auth";
 import { getPatientLabels, shouldUseClientTerminology } from "../uiTerminology";
@@ -277,6 +280,40 @@ const formatFinalScoreForDisplay = (score) => {
   return roundedScore.toFixed(2);
 };
 
+const getAssessmentClassificationPillStyle = (classification) => {
+  const normalizedClassification = String(classification || "").trim().toLowerCase();
+
+  if (normalizedClassification === "improbable tbi") {
+    return {
+      background: "rgba(20, 83, 45, 0.12)",
+      border: "1px solid rgba(22, 163, 74, 0.35)",
+      color: "#166534",
+    };
+  }
+
+  if (normalizedClassification === "probable tbi") {
+    return {
+      background: "rgba(245, 158, 11, 0.14)",
+      border: "1px solid rgba(245, 158, 11, 0.4)",
+      color: "#b45309",
+    };
+  }
+
+  if (normalizedClassification === "likely tbi") {
+    return {
+      background: "rgba(239, 68, 68, 0.12)",
+      border: "1px solid rgba(239, 68, 68, 0.35)",
+      color: "#b91c1c",
+    };
+  }
+
+  return {
+    background: "#f8fafc",
+    border: "1px solid #cbd5e1",
+    color: "#475569",
+  };
+};
+
 const getAttemptProgressAttemptId = (progressItem) => Number(
   progressItem?.patient_assessment_attempt_id ??
   progressItem?.patient_assessment_attempt?.patient_assessment_attempt_id ??
@@ -318,6 +355,14 @@ const getResponseAttemptId = (responseItem) => Number(
     responseItem?.patient_assessment_attempt_id ??
     responseItem?.patient_assessment_attempt ??
     responseItem?.attempt ??
+    0
+) || 0;
+
+const getPatientResponseId = (responseItem) => Number(
+  responseItem?.patient_response_id ??
+    responseItem?.patient_response?.patient_response_id ??
+    responseItem?.response_id ??
+    responseItem?.id ??
     0
 ) || 0;
 
@@ -3635,6 +3680,13 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [answerRows, setAnswerRows] = useState([]);
   const [answerSignatures, setAnswerSignatures] = useState([]);
   const [loadingAnswersAttemptId, setLoadingAnswersAttemptId] = useState(null);
+  const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
+  const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
+  const [selectedReportFields, setSelectedReportFields] = useState(null);
+  const [selectedReportResponses, setSelectedReportResponses] = useState([]);
+  const [loadingReportAttemptId, setLoadingReportAttemptId] = useState(null);
+  const [isDownloadingGeneratedReport, setIsDownloadingGeneratedReport] = useState(false);
+  const generatedReportRef = useRef(null);
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
@@ -3648,6 +3700,59 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     const sanitizedToken = String(tokenValue || "").trim();
     return `${assessmentAppBaseUrl}/take-assessment/${sanitizedToken}`;
   }, [assessmentAppBaseUrl]);
+
+  const handleDownloadGeneratedReportPdf = useCallback(async () => {
+    const reportElement = generatedReportRef.current;
+    if (!reportElement || isDownloadingGeneratedReport) return;
+
+    setIsDownloadingGeneratedReport(true);
+
+    try {
+      const canvas = await html2canvas(reportElement, {
+        scale: 1.5,
+        useCORS: true,
+        backgroundColor: "#0b1220",
+        logging: false,
+        windowWidth: reportElement.scrollWidth,
+        windowHeight: reportElement.scrollHeight,
+      });
+
+      const basePdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = basePdf.internal.pageSize.getWidth();
+      const renderedHeightMm = (canvas.height / canvas.width) * pageWidth;
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageWidth, renderedHeightMm] });
+      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+
+      pdf.setFillColor(11, 18, 32);
+      pdf.rect(0, 0, pageWidth, renderedHeightMm, "F");
+      pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, renderedHeightMm);
+
+      const reportAssessmentId = getAttemptAssessmentId(selectedReportAttempt);
+      const reportAssessmentName =
+        selectedReportAttempt?.assessment?.name ??
+        selectedReportAttempt?.assessment_name ??
+        `Assessment #${reportAssessmentId || "—"}`;
+
+      const assessmentName =
+        String(reportAssessmentName || "CognitrackX_Report")
+          .trim()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-zA-Z0-9_-]/g, "") || "CognitrackX_Report";
+      const reportPatientName = `${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim();
+      const patientFileName =
+        String(reportPatientName || patient?.email || "Patient")
+          .trim()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-zA-Z0-9_-]/g, "") || "Patient";
+      const dateStamp = new Date().toISOString().slice(0, 10);
+
+      pdf.save(`${assessmentName}_${patientFileName}_${dateStamp}.pdf`);
+    } catch (error) {
+      console.error("Failed to download generated report PDF", error);
+    } finally {
+      setIsDownloadingGeneratedReport(false);
+    }
+  }, [isDownloadingGeneratedReport, patient?.email, patient?.first_name, patient?.last_name, selectedReportAttempt]);
 
   const sendAssessmentLinkEmail = useCallback(async ({ recipientEmail, assessmentLink }) => {
     const trimmedRecipientEmail = String(recipientEmail || "").trim();
@@ -3815,7 +3920,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       const leftPriority = statusOrder[leftStatus] ?? Number.MAX_SAFE_INTEGER;
       const rightPriority = statusOrder[rightStatus] ?? Number.MAX_SAFE_INTEGER;
 
-      return leftPriority - rightPriority;
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+
+      const leftAttemptId = Number(getAttemptId(left) ?? 0);
+      const rightAttemptId = Number(getAttemptId(right) ?? 0);
+
+      return rightAttemptId - leftAttemptId;
     });
   }, [attempts, showRemoved]);
 
@@ -3914,6 +4026,27 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     if (!value) return "";
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
+
+  const formatCompletedAtDate = (value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+
+    return parsed.toLocaleString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const formatReportDate = (value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
     return parsed.toLocaleDateString();
   };
 
@@ -4170,8 +4303,11 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
 
     try {
       const responses = await fetchResponsesForAttempt(attemptId);
+      const sortedResponses = [...responses].sort((leftResponse, rightResponse) => (
+        getPatientResponseId(leftResponse) - getPatientResponseId(rightResponse)
+      ));
 
-      responses.forEach((responseItem) => {
+      sortedResponses.forEach((responseItem) => {
         const questionId = getResponseQuestionId(responseItem);
         const embeddedQuestion = responseItem?.question;
         if (questionId && embeddedQuestion && typeof embeddedQuestion === "object") {
@@ -4180,13 +4316,13 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       });
 
       await fetchQuestionDetailsByIds(
-        responses.map((responseItem) => getResponseQuestionId(responseItem))
+        sortedResponses.map((responseItem) => getResponseQuestionId(responseItem))
       );
 
       const nextRows = [];
       const nextSignatures = [];
 
-      responses.forEach((responseItem, index) => {
+      sortedResponses.forEach((responseItem, index) => {
         const questionId = getResponseQuestionId(responseItem);
         const questionData =
           questionDetailsByIdRef.current[questionId] ?? responseItem?.question ?? null;
@@ -4539,6 +4675,40 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     onClose();
   };
 
+  const handleOpenGeneratedReport = async (attempt, matchedEvent) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) {
+      return;
+    }
+
+    setLoadingReportAttemptId(attemptId);
+
+    const reportFields = {
+      fullName: patientName || patient?.email || "",
+      dateOfBirth: formatReportDate(patient?.dob),
+      dateOfInjury: formatReportDate(matchedEvent?.event_date ?? attempt?.patient_event?.event_date),
+      dateOfAssessment: formatReportDate(
+        attempt?.completed_at ??
+        attempt?.completedAt ??
+        attempt?.completed_on ??
+        attempt?.updated_at ??
+        ""
+      ),
+    };
+
+    try {
+      const responses = await fetchResponsesForAttempt(attemptId);
+      setSelectedReportAttempt(attempt);
+      setSelectedReportFields(reportFields);
+      setSelectedReportResponses(responses);
+      setShowGeneratedReportModal(true);
+    } catch (error) {
+      console.error("Failed to load report responses", error);
+    } finally {
+      setLoadingReportAttemptId(null);
+    }
+  };
+
   const patientName = `${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim();
   const selectedEventNumericId = Number(selectedPatientEventId);
   const selectedEvent = patientEvents.find(
@@ -4693,7 +4863,6 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                     Math.max(0, Number(attemptProgress?.currentQuestionProgress ?? 0))
                   );
                   const progressPercent = Math.round((progressValue / progressMax) * 100);
-                  const score = getAttemptFinalScore(attempt);
                   const patientEventId = getAttemptPatientEventId(attempt);
                   const matchedEvent = patientEvents.find(
                     (eventItem) => Number(getPatientEventId(eventItem)) === patientEventId
@@ -4703,7 +4872,15 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                     matchedEvent?.event ??
                     "No Event";
                   const isCompleted = String(status).toLowerCase() === "completed";
-                  const finalScore = formatFinalScoreForDisplay(score);
+                  const completedAtText = formatCompletedAtDate(
+                    attempt?.completed_at ??
+                    attempt?.completedAt ??
+                    attempt?.completed_on ??
+                    attempt?.updated_at ??
+                    ""
+                  );
+                  const classificationLabel = String(attempt?.classification || "").trim() || "Classification Pending";
+                  const classificationPillStyle = getAssessmentClassificationPillStyle(classificationLabel);
 
                   return (
                     <div
@@ -4734,6 +4911,29 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                           >
                             {status}
                           </span>
+                          {isCompleted && (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                padding: "4px 10px",
+                                borderRadius: "999px",
+                                fontSize: "0.8rem",
+                                fontWeight: 700,
+                                letterSpacing: "0.02em",
+                                ...classificationPillStyle,
+                              }}
+                            >
+                              {classificationLabel}
+                            </span>
+                          )}
+                          {isCompleted && completedAtText && (
+                            <span style={{ fontWeight: 400, color: "#475569" }}>
+                              <span style={{ color: "#2563eb" }}>Date:</span>{" "}
+                              {completedAtText}
+                            </span>
+                          )}
                           {statusKey === "in_progress" && (
                             <span className="assessment-progress-inline">
                               <progress value={progressValue} max={progressMax} />
@@ -4743,9 +4943,6 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             </span>
                           )}
                         </div>
-                        {isCompleted && (
-                          <div><strong>Final Score:</strong> {finalScore}</div>
-                        )}
                       </div>
 
                       <div className="assessment-card-footer">
@@ -4756,14 +4953,20 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                         <div
                           className="assessment-card-actions"
                           style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-end",
-                            gap: "4px",
                             marginLeft: "auto",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            {isCompleted && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                onClick={() => handleOpenGeneratedReport(attempt, matchedEvent)}
+                                disabled={loadingReportAttemptId === attemptId}
+                              >
+                                {loadingReportAttemptId === attemptId ? "Generating..." : "Generate Report"}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="assessments-action-btn"
@@ -4822,6 +5025,99 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
           <button onClick={handleCloseModal}>Close</button>
         </div>
 
+        {showGeneratedReportModal && selectedReportFields && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.56)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "20px",
+              zIndex: 1300,
+            }}
+          >
+            <div
+              style={{
+                width: "min(1280px, 100%)",
+                height: "min(92vh, 980px)",
+                background: "#ffffff",
+                borderRadius: "20px",
+                overflow: "hidden",
+                boxShadow: "0 30px 80px rgba(15, 23, 42, 0.32)",
+                border: "1px solid rgba(219, 234, 254, 0.8)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>Generated Report</div>
+                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                    {`${getAssessmentName(selectedReportAttempt)} - ${patientName || patient?.email || "Patient"}`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <button
+                    onClick={handleDownloadGeneratedReportPdf}
+                    disabled={isDownloadingGeneratedReport}
+                    style={{
+                      background: isDownloadingGeneratedReport ? "#cbd5e1" : "#0f172a",
+                      color: isDownloadingGeneratedReport ? "#475569" : "#ffffff",
+                      border: "1px solid #0f172a",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: isDownloadingGeneratedReport ? "not-allowed" : "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {isDownloadingGeneratedReport ? "Generating PDF..." : "Download PDF"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowGeneratedReportModal(false);
+                      setSelectedReportAttempt(null);
+                      setSelectedReportFields(null);
+                      setSelectedReportResponses([]);
+                    }}
+                    style={{
+                      background: "#fff",
+                      color: "#334155",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: "auto" }}>
+                <div ref={generatedReportRef}>
+                  <CognitrackXReport
+                    assessmentName={getAssessmentName(selectedReportAttempt)}
+                    reportFields={selectedReportFields}
+                    reportAttempt={selectedReportAttempt}
+                    assessmentResponses={selectedReportResponses}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAnswersModal && (
           <div className="modal-overlay" style={{ zIndex: 1300 }}>
             <div className="modal modern patient-answers-modal">
@@ -4831,9 +5127,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                     {`${getAssessmentName(selectedAnswersAttempt)} - ${`${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim() || patient?.email || "Patient"}`}
                   </h3>
                   <div className="patient-answers-score-pill-wrap">
-                    <span className="patient-answers-score-label">Total Score</span>
-                    <span className="patient-answers-score-pill">
-                      {formatFinalScoreForDisplay(getAttemptFinalScore(selectedAnswersAttempt))}
+                    <span
+                      className="patient-answers-score-pill"
+                      style={{
+                        ...getAssessmentClassificationPillStyle(selectedAnswersAttempt?.classification),
+                        fontWeight: 700,
+                      }}
+                    >
+                      {String(selectedAnswersAttempt?.classification || "").trim() || "Classification Pending"}
                     </span>
                   </div>
                 </div>
