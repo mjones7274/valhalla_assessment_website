@@ -25,11 +25,11 @@ const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-atte
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
 const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
+const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
 const TEST_SEND_EMAIL_API = `${API_BASE}/api/test/send-email`;
 const TEST_SEND_EMAIL_API_ALT = `${API_BASE}/api/test/send-email/`;
 const ASSESSMENTS_API = `${API_BASE}/api/assessments/`;
-const QUESTIONS_API = `${API_BASE}/api/questions/`;
 const PEOPLE_API = `${API_BASE}/api/people/`;
 const PERSON_TYPES_API = `${API_BASE}/api/person-types/`;
 const PHONE_TYPES_API = `${API_BASE}/api/phone-types/`;
@@ -373,17 +373,6 @@ const getResponseQuestionId = (responseItem) => Number(
     0
 ) || 0;
 
-const getQuestionTypeDescription = (question) =>
-  String(
-    question?.question_type?.description ??
-      question?.question_type_description ??
-      question?.question_type ??
-      ""
-  )
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-
 const formatAnswerKeyLabel = (key) =>
   String(key ?? "")
     .replace(/_/g, " ")
@@ -412,7 +401,16 @@ const formatAnswerValueForTable = (value) => {
     if (hasOption || hasValue) {
       const optionText = formatAnswerValueForTable(value.option);
       const valueText = formatAnswerValueForTable(value.value);
-      return optionText !== "—" ? optionText : valueText;
+      const primaryText = optionText !== "—" ? optionText : valueText;
+      const subAnswerOptionText = formatAnswerValueForTable(value?.sub_answer?.option);
+
+      if (primaryText === "—") {
+        return subAnswerOptionText !== "—" ? `(${subAnswerOptionText})` : "—";
+      }
+
+      return subAnswerOptionText !== "—"
+        ? `${primaryText} (${subAnswerOptionText})`
+        : primaryText;
     }
 
     const formattedEntries = Object.entries(value)
@@ -428,6 +426,25 @@ const formatAnswerValueForTable = (value) => {
   }
 
   return String(value);
+};
+
+const hasSubAnswerValue = (value) => {
+  if (value === null || value === undefined) return false;
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasSubAnswerValue(item));
+  }
+
+  if (typeof value === "object") {
+    if (value?.sub_answer && typeof value.sub_answer === "object") {
+      const subAnswerOption = String(value.sub_answer?.option ?? "").trim();
+      if (subAnswerOption) return true;
+    }
+
+    return Object.values(value).some((nestedValue) => hasSubAnswerValue(nestedValue));
+  }
+
+  return false;
 };
 
 const getAnswerUrl = (value) => {
@@ -446,7 +463,43 @@ const getAnswerUrl = (value) => {
   return "";
 };
 
-const renderAnswerItem = (answer) => {
+const renderAnswerItem = (answer, options = {}) => {
+  if (answer && typeof answer === "object" && !Array.isArray(answer)) {
+    if (answer.kind === "labeled_answer_group") {
+      const items = Array.isArray(answer.items) ? answer.items : [];
+      return (
+        <div className="patient-answers-labeled-group">
+          {items.map((item, index) => (
+            <div
+              key={`${String(item?.label ?? "item")}-${index}`}
+              className="patient-answers-labeled-row"
+            >
+              <span className="patient-answers-labeled-key">{item?.label}:</span>{" "}
+              <span className="patient-answers-labeled-value">
+                {renderAnswerItem(item?.value, options)}
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (answer.kind === "patient_document_link") {
+      const patientDocumentId = Number(answer.patientDocumentId) || 0;
+      const isLoading = Number(options.loadingDocumentId) === patientDocumentId;
+      return (
+        <button
+          type="button"
+          className="patient-answers-link-button"
+          onClick={() => options.onOpenPatientDocument?.(patientDocumentId)}
+          disabled={!patientDocumentId || isLoading || !options.onOpenPatientDocument}
+        >
+          {isLoading ? "Opening..." : "View document"}
+        </button>
+      );
+    }
+  }
+
   const answerUrl = getAnswerUrl(answer);
   if (answerUrl) {
     const linkLabel = /\.pdf(?:\?|#|$)/i.test(answerUrl) ? "Open document" : "Open link";
@@ -465,18 +518,18 @@ const renderAnswerItem = (answer) => {
   return answer;
 };
 
-const renderAnswerContent = (answer) => {
+const renderAnswerContent = (answer, options = {}) => {
   if (Array.isArray(answer)) {
     return (
       <ul className="patient-answers-list">
         {answer.map((item, index) => (
-          <li key={`${String(item)}-${index}`}>{renderAnswerItem(item)}</li>
+          <li key={`${String(item)}-${index}`}>{renderAnswerItem(item, options)}</li>
         ))}
       </ul>
     );
   }
 
-  return renderAnswerItem(answer);
+  return renderAnswerItem(answer, options);
 };
 
 const isBlankAnswerValue = (value) => {
@@ -589,18 +642,55 @@ const Patients = () => {
       })
       .filter(matchesSearch)
       .sort((a, b) => {
-        let valA;
-        let valB;
+        const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
+        const compareValues = (leftValue, rightValue) => {
+          if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
+          if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
+          return 0;
+        };
 
-        switch (sortField) {
-          case "company":
-            valA = getCompanyNames(a);
-            valB = getCompanyNames(b);
-            break;
-          default:
-            valA = a[sortField];
-            valB = b[sortField];
+        if (sortField === "company") {
+          return compareValues(
+            normalizeText(getCompanyNames(a)),
+            normalizeText(getCompanyNames(b))
+          );
         }
+
+        if (sortField === "created_on") {
+          return compareValues(
+            new Date(a.created_on).getTime() || 0,
+            new Date(b.created_on).getTime() || 0
+          );
+        }
+
+        if (sortField === "last_name") {
+          const primaryResult = compareValues(
+            normalizeText(a.last_name),
+            normalizeText(b.last_name)
+          );
+          if (primaryResult !== 0) return primaryResult;
+
+          return compareValues(
+            normalizeText(a.first_name),
+            normalizeText(b.first_name)
+          );
+        }
+
+        if (sortField === "first_name") {
+          const primaryResult = compareValues(
+            normalizeText(a.first_name),
+            normalizeText(b.first_name)
+          );
+          if (primaryResult !== 0) return primaryResult;
+
+          return compareValues(
+            normalizeText(a.last_name),
+            normalizeText(b.last_name)
+          );
+        }
+
+        const valA = a[sortField];
+        const valB = b[sortField];
 
         if (valA < valB) return sortDirection === "asc" ? -1 : 1;
         if (valA > valB) return sortDirection === "asc" ? 1 : -1;
@@ -625,13 +715,27 @@ const Patients = () => {
     }
   };
 
+  const renderSortCaret = (field) => {
+    const isActive = sortField === field;
+    if (!isActive) return null;
+
+    return (
+      <span className="patients-sort-caret is-active" aria-hidden="true">
+        {sortDirection === "asc" ? "▲" : "▼"}
+      </span>
+    );
+  };
+
   /* ----------------------------------
      Render
   ---------------------------------- */
 
   return (
     <div className="patients-page">
-      <h1>{patientLabels.plural}</h1>
+      <h1>
+        {patientLabels.plural}
+        <span className="patients-page-count">{sortedPatients.length}</span>
+      </h1>
         <div className="patients-toolbar">
             <input
                 className="search-bar"
@@ -656,12 +760,37 @@ const Patients = () => {
       <table className="patients-table">
         <thead>
           <tr>
-            <th onClick={() => toggleSort("patient_id")}>ID</th>
-            <th onClick={() => toggleSort("first_name")}>First Name</th>
-            <th onClick={() => toggleSort("last_name")}>Last Name</th>
-            <th onClick={() => toggleSort("email")}>Email</th>
-            <th onClick={() => toggleSort("company")}>Company</th>
-            <th onClick={() => toggleSort("created_on")}>Created</th>
+            <th onClick={() => toggleSort("patient_id")}>
+              <span className="patients-sort-header">
+                <span>ID</span>
+                {renderSortCaret("patient_id")}
+              </span>
+            </th>
+            <th onClick={() => toggleSort("first_name")}>
+              <span className="patients-sort-header">
+                <span>First Name</span>
+                {renderSortCaret("first_name")}
+              </span>
+            </th>
+            <th onClick={() => toggleSort("last_name")}>
+              <span className="patients-sort-header">
+                <span>Last Name</span>
+                {renderSortCaret("last_name")}
+              </span>
+            </th>
+            <th>Email</th>
+            <th onClick={() => toggleSort("company")}>
+              <span className="patients-sort-header">
+                <span>Company</span>
+                {renderSortCaret("company")}
+              </span>
+            </th>
+            <th onClick={() => toggleSort("created_on")}>
+              <span className="patients-sort-header">
+                <span>Created</span>
+                {renderSortCaret("created_on")}
+              </span>
+            </th>
             <th>Assessments</th>
             <th>{patientLabels.singular} Info</th>
           </tr>
@@ -3665,7 +3794,6 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [isEventDropdownOpen, setIsEventDropdownOpen] = useState(false);
   const eventDropdownRef = useRef(null);
   const linkFeedbackTimeoutsRef = useRef({});
-  const questionDetailsByIdRef = useRef({});
   const [selectedAssessmentId, setSelectedAssessmentId] = useState("");
   const [loading, setLoading] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -3678,7 +3806,8 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [answersLoading, setAnswersLoading] = useState(false);
   const [answersError, setAnswersError] = useState("");
   const [answerRows, setAnswerRows] = useState([]);
-  const [answerSignatures, setAnswerSignatures] = useState([]);
+  const [answerDocumentLoadingId, setAnswerDocumentLoadingId] = useState(null);
+  const [answerDocumentError, setAnswerDocumentError] = useState("");
   const [loadingAnswersAttemptId, setLoadingAnswersAttemptId] = useState(null);
   const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
@@ -3842,13 +3971,17 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       return [];
     }
 
-    const attemptsRes = await apiRequest(PATIENT_ASSESSMENT_ATTEMPTS_API);
+    const patientId = Number(patient.patient_id);
+    const attemptsUrl = `${PATIENT_ASSESSMENT_ATTEMPTS_API}?patient=${patientId}`;
+    const attemptsRes = await apiRequest(attemptsUrl);
     const attemptsData = await attemptsRes.json();
-    const patientAttempts = attemptsData.filter(
-      (attempt) => getAttemptPatientId(attempt) === Number(patient.patient_id)
-    );
+    const attemptRows = Array.isArray(attemptsData)
+      ? attemptsData
+      : Array.isArray(attemptsData?.results)
+        ? attemptsData.results
+        : [];
 
-    const normalizedAttempts = patientAttempts.map((attempt) => {
+    const normalizedAttempts = attemptRows.map((attempt) => {
       const resolvedAttemptId = attempt.id ?? getAttemptId(attempt);
       return {
         ...attempt,
@@ -3873,11 +4006,15 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       return;
     }
 
-    const eventsRes = await apiRequest(PATIENT_EVENTS_API);
+    const patientId = Number(patient.patient_id);
+    const eventsUrl = `${PATIENT_EVENTS_API}?patient=${patientId}`;
+    const eventsRes = await apiRequest(eventsUrl);
     const eventsData = await eventsRes.json();
-    const filtered = eventsData.filter(
-      (item) => getPatientIdFromPatientEvent(item) === Number(patient.patient_id)
-    );
+    const filtered = Array.isArray(eventsData)
+      ? eventsData
+      : Array.isArray(eventsData?.results)
+        ? eventsData.results
+        : [];
     setPatientEvents(filtered);
   }, [patient?.patient_id]);
 
@@ -3951,11 +4088,18 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       return;
     }
 
+    if (!patient?.patient_id) {
+      setAttemptProgressByAttemptId({});
+      return;
+    }
+
     let cancelled = false;
 
     const loadAttemptProgress = async () => {
       try {
-        const progressRes = await apiRequest(PATIENT_ATTEMPT_PROGRESS_API);
+        const patientId = Number(patient.patient_id);
+        const progressUrl = `${PATIENT_ATTEMPT_PROGRESS_API}?patient_id=${patientId}`;
+        const progressRes = await apiRequest(progressUrl);
         const progressData = await progressRes.json();
 
         const rows = Array.isArray(progressData)
@@ -3998,7 +4142,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [inProgressAttemptIds, inProgressAttemptIdsKey]);
+  }, [inProgressAttemptIds, inProgressAttemptIdsKey, patient?.patient_id]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -4107,7 +4251,8 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       return null;
     }
 
-    const progressRes = await apiRequest(PATIENT_ATTEMPT_PROGRESS_API);
+    const progressUrl = `${PATIENT_ATTEMPT_PROGRESS_API}?attempt_id=${normalizedAttemptId}`;
+    const progressRes = await apiRequest(progressUrl);
     const progressData = await progressRes.json();
     const rows = Array.isArray(progressData)
       ? progressData
@@ -4264,27 +4409,21 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     );
   }, []);
 
-  const fetchQuestionDetailsByIds = useCallback(async (questionIds) => {
-    const uniqueIds = Array.from(
-      new Set(
-        (questionIds || [])
-          .map((questionId) => Number(questionId))
-          .filter((questionId) => Number.isFinite(questionId) && questionId > 0)
-      )
+  const fetchResponseHistoryForAttempt = useCallback(async (attemptId) => {
+    const normalizedAttemptId = Number(attemptId);
+    if (!Number.isFinite(normalizedAttemptId) || normalizedAttemptId <= 0) {
+      return [];
+    }
+
+    const response = await apiRequest(
+      `${PATIENT_RESPONSES_HISTORY_API}?assessment_attempt_id=${normalizedAttemptId}`
     );
 
-    await Promise.all(uniqueIds.map(async (questionId) => {
-      if (questionDetailsByIdRef.current[questionId]) return;
+    if (!response.ok) {
+      throw new Error(`Failed to load assessment answers (status ${response.status}).`);
+    }
 
-      try {
-        const response = await apiRequest(`${QUESTIONS_API}${questionId}/`);
-        if (!response.ok) return;
-        const questionPayload = await response.json();
-        questionDetailsByIdRef.current[questionId] = questionPayload;
-      } catch {
-        // Fall back to the numeric id if question details cannot be resolved.
-      }
-    }));
+    return normalizeApiRows(await response.json());
   }, []);
 
   const handleViewAnswers = useCallback(async (attempt) => {
@@ -4297,39 +4436,29 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     setSelectedAnswersAttempt(attempt);
     setAnswersLoading(true);
     setAnswersError("");
+    setAnswerDocumentError("");
+    setAnswerDocumentLoadingId(null);
     setAnswerRows([]);
-    setAnswerSignatures([]);
     setLoadingAnswersAttemptId(attemptId);
 
     try {
-      const responses = await fetchResponsesForAttempt(attemptId);
+      const responses = await fetchResponseHistoryForAttempt(attemptId);
       const sortedResponses = [...responses].sort((leftResponse, rightResponse) => (
         getPatientResponseId(leftResponse) - getPatientResponseId(rightResponse)
       ));
 
-      sortedResponses.forEach((responseItem) => {
-        const questionId = getResponseQuestionId(responseItem);
-        const embeddedQuestion = responseItem?.question;
-        if (questionId && embeddedQuestion && typeof embeddedQuestion === "object") {
-          questionDetailsByIdRef.current[questionId] = embeddedQuestion;
-        }
-      });
-
-      await fetchQuestionDetailsByIds(
-        sortedResponses.map((responseItem) => getResponseQuestionId(responseItem))
-      );
-
       const nextRows = [];
-      const nextSignatures = [];
 
       sortedResponses.forEach((responseItem, index) => {
         const questionId = getResponseQuestionId(responseItem);
-        const questionData =
-          questionDetailsByIdRef.current[questionId] ?? responseItem?.question ?? null;
         const questionText =
-          String(questionData?.question ?? responseItem?.question?.question ?? "").trim() ||
+          String(responseItem?.question ?? "").trim() ||
           `Question #${questionId || index + 1}`;
-        const questionTypeDescription = getQuestionTypeDescription(questionData);
+        const subQuestionPrompt =
+          String(
+            responseItem?.sub_question_prompt ??
+            ""
+          ).trim();
         const resolvedAnswerValue = normalizeStoredAnswerValue(
           responseItem?.answer_value ??
             responseItem?.answerValue ??
@@ -4340,34 +4469,58 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
         );
 
         if (
-          questionTypeDescription === "signature_agreement" &&
           resolvedAnswerValue &&
           typeof resolvedAnswerValue === "object" &&
-          !Array.isArray(resolvedAnswerValue)
+          !Array.isArray(resolvedAnswerValue) &&
+          Object.prototype.hasOwnProperty.call(resolvedAnswerValue, "signature_data_url")
         ) {
-          Object.entries(resolvedAnswerValue).forEach(([key, value]) => {
-            if (key === "signature_data_url") {
-              const signatureUrl = String(value ?? "").trim();
-              if (signatureUrl) {
-                nextSignatures.push({
-                  key: `${questionId}-signature`,
-                  question: questionText,
-                  signatureUrl,
-                });
+          const patientDocumentId = Number(resolvedAnswerValue?.patient_document_id ?? 0) || 0;
+          const signatureUrl = String(resolvedAnswerValue?.signature_data_url ?? "").trim();
+
+          const answerItems = Object.entries(resolvedAnswerValue)
+            .map(([key, value]) => {
+              if (key === "signature_data_url") {
+                return null;
               }
-              return;
-            }
 
-            if (isBlankAnswerValue(value)) {
-              return;
-            }
+              if (key === "patient_document_id") {
+                if (!patientDocumentId) return null;
+                return {
+                  label: "Document",
+                  value: {
+                    kind: "patient_document_link",
+                    patientDocumentId,
+                  },
+                };
+              }
 
-            nextRows.push({
-              key: `${questionId}-${key}`,
-              question: `${questionText} - ${formatAnswerKeyLabel(key)}`,
-              answer: formatAnswerValueForTable(value),
-            });
+              if (isBlankAnswerValue(value)) {
+                return null;
+              }
+
+              return {
+                label: formatAnswerKeyLabel(key),
+                value: formatAnswerValueForTable(value),
+              };
+            })
+            .filter(Boolean);
+
+          answerItems.push({
+            label: "Signed",
+            value: signatureUrl ? "Yes" : "No",
           });
+
+          if (answerItems.length) {
+            nextRows.push({
+              key: `${questionId || index}-signature-answer`,
+              question: questionText,
+              answer: {
+                kind: "labeled_answer_group",
+                items: answerItems,
+              },
+            });
+          }
+
           return;
         }
 
@@ -4375,25 +4528,28 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
           return;
         }
 
+        const questionSubPrompt = hasSubAnswerValue(resolvedAnswerValue)
+          ? subQuestionPrompt
+          : "";
+
         nextRows.push({
           key: `${questionId || index}-answer`,
           question: questionText,
+          questionSubPrompt,
           answer: formatAnswerValueForTable(resolvedAnswerValue),
         });
       });
 
       setAnswerRows(nextRows);
-      setAnswerSignatures(nextSignatures);
     } catch (error) {
       console.error("Load assessment answers failed", error);
       setAnswersError(error?.message || "Failed to load assessment answers.");
       setAnswerRows([]);
-      setAnswerSignatures([]);
     } finally {
       setAnswersLoading(false);
       setLoadingAnswersAttemptId(null);
     }
-  }, [fetchQuestionDetailsByIds, fetchResponsesForAttempt]);
+  }, [fetchResponseHistoryForAttempt]);
 
   const showLinkFeedback = useCallback((attempt, message) => {
     const feedbackKey = getAttemptFeedbackKey(attempt);
@@ -4428,6 +4584,56 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       });
       linkFeedbackTimeoutsRef.current = {};
     };
+  }, []);
+
+  const openPatientDocument = useCallback(async (patientDocumentId) => {
+    const resolvedDocumentId = Number(patientDocumentId) || 0;
+    if (!resolvedDocumentId) return;
+
+    const previewWindow = window.open("about:blank", "_blank");
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.document.title = "Loading document";
+      previewWindow.document.body.innerHTML = "<p style=\"font-family:Arial,sans-serif;padding:24px\">Loading document...</p>";
+    }
+
+    setAnswerDocumentError("");
+    setAnswerDocumentLoadingId(resolvedDocumentId);
+
+    const requestUrlWithSlash = `${DOCUMENT_DOWNLOAD_GET_LINK_API}${resolvedDocumentId}/`;
+    const requestUrlWithoutSlash = `${DOCUMENT_DOWNLOAD_GET_LINK_API}${resolvedDocumentId}`;
+
+    try {
+      let response = await apiRequest(requestUrlWithSlash);
+      if (!response.ok && response.status === 404) {
+        response = await apiRequest(requestUrlWithoutSlash);
+      }
+
+      if (!response.ok) {
+        const message = await response.text().catch(() => "");
+        throw new Error(`Document link request failed (${response.status}) ${message}`);
+      }
+
+      const payload = await response.json().catch(() => null);
+      const documentUrl = String(payload?.document_url ?? "").trim();
+      if (!documentUrl) {
+        throw new Error("Document download response is missing document_url.");
+      }
+
+      if (previewWindow) {
+        previewWindow.location.replace(documentUrl);
+        previewWindow.focus();
+      } else {
+        window.open(documentUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
+      setAnswerDocumentError(error?.message || "Failed to open document.");
+    } finally {
+      setAnswerDocumentLoadingId(null);
+    }
   }, []);
 
   const handleSendLink = useCallback(async (attempt) => {
@@ -5168,10 +5374,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                   </div>
                 ) : answersError ? (
                   <div className="api-debug-error">{answersError}</div>
-                ) : answerRows.length === 0 && answerSignatures.length === 0 ? (
+                ) : answerRows.length === 0 ? (
                   <div className="people-empty">No answers found for this assessment.</div>
                 ) : (
                   <>
+                    {answerDocumentError ? (
+                      <div className="api-debug-error">{answerDocumentError}</div>
+                    ) : null}
+
                     <div className="patient-answers-table-wrap">
                       <table className="patient-answers-table">
                         <thead>
@@ -5183,35 +5393,25 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                         <tbody>
                           {answerRows.map((row) => (
                             <tr key={row.key}>
-                              <td>{row.question}</td>
-                              <td>{renderAnswerContent(row.answer)}</td>
+                              <td>
+                                <div>{row.question}</div>
+                                {row.questionSubPrompt ? (
+                                  <div style={{ fontWeight: 400, color: "#475569", marginTop: "4px" }}>
+                                    ({row.questionSubPrompt})
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td>
+                                {renderAnswerContent(row.answer, {
+                                  onOpenPatientDocument: openPatientDocument,
+                                  loadingDocumentId: answerDocumentLoadingId,
+                                })}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-
-                    {answerSignatures.length > 0 && (
-                      <div className="patient-answers-signatures-section">
-                        <div className="patient-answers-signatures-title">Signature</div>
-                        <div className="patient-answers-signatures-grid">
-                          {answerSignatures.map((signatureItem) => (
-                            <div key={signatureItem.key} className="patient-answers-signature-card">
-                              <div className="patient-answers-signature-question">
-                                {signatureItem.question}
-                              </div>
-                              <div className="patient-answers-signature-box">
-                                <img
-                                  src={signatureItem.signatureUrl}
-                                  alt={`${signatureItem.question} signature`}
-                                  className="patient-answers-signature-image"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </>
                 )}
               </div>

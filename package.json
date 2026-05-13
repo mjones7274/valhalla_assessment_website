@@ -30,6 +30,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "postinstall": "node scripts/fix-dompurify-sourcemaps.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

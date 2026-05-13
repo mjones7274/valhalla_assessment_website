@@ -20,6 +20,16 @@ const labelStyle = {
   fontWeight: 600,
 };
 
+const normalizeQuestionTypeDescription = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const isSignatureAgreementQuestionType = (questionTypeId, description) =>
+  Number(questionTypeId) === 33 ||
+  normalizeQuestionTypeDescription(description) === "signature_agreement";
+
 
 export default function QuestionModal({
   isOpen,
@@ -57,15 +67,21 @@ export default function QuestionModal({
 //   console.log("is create mode", isCreateMode)
 
   const isPerformTaskVideo =
-    String(selectedQuestionType?.description ?? "").trim().toLowerCase() ===
+    normalizeQuestionTypeDescription(selectedQuestionType?.description) ===
     "perform_task_video";
-  const isSignatureAgreement =
-    String(selectedQuestionType?.description ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_") === "signature_agreement";
+  const isSignatureAgreement = isSignatureAgreementQuestionType(
+    editingQuestion.question_type_id,
+    selectedQuestionType?.description
+  );
+  const normalizedChoices = Array.isArray(editingQuestion.choices)
+    ? editingQuestion.choices
+    : [];
+  const signatureAgreementChoicesJson =
+    typeof editingQuestion.choices_json === "string"
+      ? editingQuestion.choices_json
+      : JSON.stringify(editingQuestion.choices ?? [], null, 2);
 
-  const sortedChoices = [...editingQuestion.choices].sort(
+  const sortedChoices = [...normalizedChoices].sort(
         (a, b) => a.order - b.order
     );
 
@@ -103,6 +119,11 @@ export default function QuestionModal({
     editingQuestion.sub_question_type === null
       ? ""
       : String(editingQuestion.sub_question_type);
+  const subQuestionPrompt =
+    editingQuestion.sub_question_prompt === undefined ||
+    editingQuestion.sub_question_prompt === null
+      ? ""
+      : String(editingQuestion.sub_question_prompt);
     // console.log("sorted choices", sortedChoices)
 
   return (
@@ -291,6 +312,25 @@ export default function QuestionModal({
             </select>
           </div>
 
+          <div style={{ marginBottom: "16px" }}>
+            <label style={labelStyle}>Subquestion Prompt</label>
+            <input
+              style={{
+                ...inputStyle,
+                opacity: editingQuestion.has_subquestion ? 1 : 0.6,
+                cursor: editingQuestion.has_subquestion ? "text" : "not-allowed",
+              }}
+              value={subQuestionPrompt}
+              disabled={!editingQuestion.has_subquestion}
+              onChange={(e) =>
+                setEditingQuestion({
+                  ...editingQuestion,
+                  sub_question_prompt: e.target.value,
+                })
+              }
+            />
+          </div>
+
           {/* Question Type */}
           <div style={{ marginBottom: "16px" }}>
             <label style={labelStyle}>Question Response Types</label>
@@ -301,6 +341,10 @@ export default function QuestionModal({
                 const newTypeId = Number(e.target.value);
                 const qt = questionTypes.find(
                     (t) => t.question_type_id === newTypeId
+                );
+                const isNextSignatureAgreement = isSignatureAgreementQuestionType(
+                  newTypeId,
+                  qt?.description
                 );
 
                 const options = qt?.options;
@@ -323,7 +367,12 @@ export default function QuestionModal({
                 setEditingQuestion({
                     ...editingQuestion,
                     question_type_id: newTypeId,
-                    choices: nextChoices,
+                    choices: isNextSignatureAgreement ? editingQuestion.choices : nextChoices,
+                    choices_json: isNextSignatureAgreement
+                      ? typeof editingQuestion.choices_json === "string"
+                        ? editingQuestion.choices_json
+                        : JSON.stringify(editingQuestion.choices ?? [], null, 2)
+                      : "",
                 });
             }}
 
@@ -397,159 +446,176 @@ export default function QuestionModal({
                 color: "#2563eb",
               }}
             >
-              Response Options
+              {isSignatureAgreement ? "Response JSON" : "Response Options"}
             </div>
 
-            {/* Table Header */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "3fr 1fr 90px 90px 40px",
-                fontSize: "0.8rem",
-                color: "#666",
-                padding: "6px 0",
-              }}
-            >
-              <div>Option</div>
-              <div>Report Verbiage</div>
-              <div style={{ textAlign: "center" }}>Value</div>
-              <div style={{ textAlign: "center" }}>Order</div>
-              <div />
-            </div>
+            {isSignatureAgreement ? (
+              <textarea
+                rows={12}
+                style={{
+                  ...inputStyle,
+                  fontFamily: "Consolas, 'Courier New', monospace",
+                  whiteSpace: "pre",
+                  resize: "vertical",
+                }}
+                value={signatureAgreementChoicesJson}
+                onChange={(e) =>
+                  setEditingQuestion({
+                    ...editingQuestion,
+                    choices_json: e.target.value,
+                  })
+                }
+              />
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "3fr 1fr 90px 90px 40px",
+                    fontSize: "0.8rem",
+                    color: "#666",
+                    padding: "6px 0",
+                  }}
+                >
+                  <div>Option</div>
+                  <div>Report Verbiage</div>
+                  <div style={{ textAlign: "center" }}>Value</div>
+                  <div style={{ textAlign: "center" }}>Order</div>
+                  <div />
+                </div>
 
-            {/* Rows */}
-            {sortedChoices.map((r, idx) => {
-                const originalIndex = editingQuestion.choices.indexOf(r);
+                {sortedChoices.map((r, idx) => {
+                  const originalIndex = normalizedChoices.indexOf(r);
 
-                return (
-                    <div
-                    key={`choice-${originalIndex}-${idx}`}
-                    style={{
-                        display: "grid",
-                      gridTemplateColumns: "3fr 1fr 90px 90px 40px",
-                        gap: "8px",
-                        marginBottom: "8px",
-                    }}
-                    >
-
-                    <input
-                      ref={(el) => {
-                      if (el) {
-                        optionInputRefs.current[originalIndex] = el;
-                      } else {
-                        delete optionInputRefs.current[originalIndex];
-                      }
-                      }}
-                        style={inputStyle}
-                        value={r.option}
-                        onChange={(e) => {
-                        const next = [...editingQuestion.choices];
-                        next[originalIndex] = {
-                            ...next[originalIndex],
-                            option: e.target.value,
-                        };
-                        setEditingQuestion({ ...editingQuestion, choices: next });
-                        }}
-                    />
-
-
-                    <input
-                      style={inputStyle}
-                      value={r.report_verbiage ?? ""}
-                      onChange={(e) => {
-                      const next = [...editingQuestion.choices];
-                      next[originalIndex] = {
-                        ...next[originalIndex],
-                        report_verbiage: e.target.value,
-                      };
-                      setEditingQuestion({ ...editingQuestion, choices: next });
-                      }}
-                    />
-
-
-                    <input
-                        type="number"
-                        style={numberInputStyle}
-                        value={r.value}
-                        onChange={(e) => {
-                        const next = [...editingQuestion.choices];
-                        next[originalIndex] = {
-                            ...next[originalIndex],
-                            value: Number(e.target.value),
-                        };
-                        setEditingQuestion({ ...editingQuestion, choices: next });
-                        }}
-                    />
-
-                    <input
-                        type="number"
-                        style={numberInputStyle}
-                        value={r.order}
-                        onChange={(e) => {
-                        const next = [...editingQuestion.choices];
-                        next[originalIndex] = {
-                            ...next[originalIndex],
-                            order: Number(e.target.value),
-                        };
-                        setEditingQuestion({ ...editingQuestion, choices: next });
-                        }}
-                    />
-
-                    <button
-                        onClick={() =>
-                        setEditingQuestion({
-                            ...editingQuestion,
-                            choices: editingQuestion.choices.filter(
-                            (_, i) => i !== originalIndex
-                            ),
-                        })
-                        }
+                    return (
+                        <div
+                        key={`choice-${originalIndex}-${idx}`}
                         style={{
+                            display: "grid",
+                          gridTemplateColumns: "3fr 1fr 90px 90px 40px",
+                            gap: "8px",
+                            marginBottom: "8px",
+                        }}
+                        >
+
+                        <input
+                          ref={(el) => {
+                          if (el) {
+                            optionInputRefs.current[originalIndex] = el;
+                          } else {
+                            delete optionInputRefs.current[originalIndex];
+                          }
+                          }}
+                            style={inputStyle}
+                            value={r.option}
+                            onChange={(e) => {
+                            const next = [...normalizedChoices];
+                            next[originalIndex] = {
+                                ...next[originalIndex],
+                                option: e.target.value,
+                            };
+                            setEditingQuestion({ ...editingQuestion, choices: next });
+                            }}
+                        />
+
+
+                        <input
+                          style={inputStyle}
+                          value={r.report_verbiage ?? ""}
+                          onChange={(e) => {
+                          const next = [...normalizedChoices];
+                          next[originalIndex] = {
+                            ...next[originalIndex],
+                            report_verbiage: e.target.value,
+                          };
+                          setEditingQuestion({ ...editingQuestion, choices: next });
+                          }}
+                        />
+
+
+                        <input
+                            type="number"
+                            style={numberInputStyle}
+                            value={r.value}
+                            onChange={(e) => {
+                          const next = [...normalizedChoices];
+                            next[originalIndex] = {
+                                ...next[originalIndex],
+                                value: Number(e.target.value),
+                            };
+                            setEditingQuestion({ ...editingQuestion, choices: next });
+                            }}
+                        />
+
+                        <input
+                            type="number"
+                            style={numberInputStyle}
+                            value={r.order}
+                            onChange={(e) => {
+                          const next = [...normalizedChoices];
+                            next[originalIndex] = {
+                                ...next[originalIndex],
+                                order: Number(e.target.value),
+                            };
+                            setEditingQuestion({ ...editingQuestion, choices: next });
+                            }}
+                        />
+
+                        <button
+                            onClick={() =>
+                            setEditingQuestion({
+                                ...editingQuestion,
+                              choices: normalizedChoices.filter(
+                                (_, i) => i !== originalIndex
+                                ),
+                            })
+                            }
+                            style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            }}
+                        >
+                            ❌
+                        </button>
+                        </div>
+                    );
+                    })}
+
+                {!editingQuestion.use_default_options && (
+                  <button
+                    style={{
+                        marginTop: "8px",
                         background: "transparent",
                         border: "none",
+                        color: "#2563eb",
                         cursor: "pointer",
-                        }}
+                    }}
+                    onClick={() =>
+                      {
+                      const nextIndex = normalizedChoices.length;
+                      nextOptionFocusIndexRef.current = nextIndex;
+
+                        setEditingQuestion({
+                        ...editingQuestion,
+                        choices: [
+                            ...normalizedChoices,
+                            {
+                            option: "",
+                            report_verbiage: "",
+                            value: 0,
+                            order: normalizedChoices.length + 1,
+                            },
+                        ],
+                        })
+                          }
+                    }
                     >
-                        ❌
-                    </button>
-                    </div>
-                );
-                })}
+                    + Add Response
+                </button>
 
-
-
-            {!editingQuestion.use_default_options && (
-              <button
-                style={{
-                    marginTop: "8px",
-                    background: "transparent",
-                    border: "none",
-                    color: "#2563eb",
-                    cursor: "pointer",
-                }}
-                onClick={() =>
-                  {
-                  const nextIndex = editingQuestion.choices.length;
-                  nextOptionFocusIndexRef.current = nextIndex;
-
-                    setEditingQuestion({
-                    ...editingQuestion,
-                    choices: [
-                        ...editingQuestion.choices,
-                        {
-                        option: "",
-                        report_verbiage: "",
-                        value: 0,
-                        order: editingQuestion.choices.length + 1,
-                        },
-                    ],
-                    })
-                      }
-                }
-                >
-                + Add Response
-            </button>
-
+                )}
+              </>
             )}
           </div>
 

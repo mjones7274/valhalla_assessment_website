@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import "./RunAssessment.css";
 import { getSelectedCompany } from "../auth";
 import { apiRequest } from "../api";
@@ -9,15 +10,12 @@ const PERF_DEBUG = process.env.REACT_APP_PERF_DEBUG === "1";
 const DEFAULT_BRAND_LOGO_URL =
   "https://valhallaplus.org/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fvalhalla-icon.c13cd40e.png&w=64&q=75";
 const API_BASE = process.env.REACT_APP_API_URL_BASE;
+const PATIENTS_API = `${API_BASE}/api/patients/`;
+const DOCUMENT_UPLOAD_GET_LINK_API = `${API_BASE}/api/document-upload/get-link/`;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const ASSESSMENT_CLASSIFICATIONS_API = `${API_BASE}/api/assessment-classifications/`;
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
 
 const normalizePrefillPrompt = (value) => {
   const normalized = String(value ?? "")
@@ -90,7 +88,328 @@ const normalizeQuestionType = (question) =>
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
 
-const getPersistedAnswerPayload = (question, responseValue) => {
+const toSnakeCase = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase();
+
+const normalizeStructuredAgreementSource = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof value === "object" && !Array.isArray(value) ? value : null;
+};
+
+const getCaseInsensitiveValue = (source, targetKey) => {
+  if (!source || typeof source !== "object") return undefined;
+
+  const normalizedTargetKey = String(targetKey ?? "").trim().toLowerCase();
+  const entry = Object.entries(source).find(
+    ([key]) => String(key ?? "").trim().toLowerCase() === normalizedTargetKey
+  );
+
+  return entry ? entry[1] : undefined;
+};
+
+const getOrderedPrefixedEntries = (source, prefix) => {
+  if (!source || typeof source !== "object") return [];
+
+  const matcher = new RegExp(`^${prefix}(\\d+)$`, "i");
+
+  return Object.entries(source)
+    .map(([key, value]) => {
+      const match = String(key ?? "").match(matcher);
+      return match
+        ? {
+            key,
+            order: Number(match[1]),
+            value,
+          }
+        : null;
+    })
+    .filter((entry) => entry && Number.isFinite(entry.order))
+    .sort((left, right) => left.order - right.order);
+};
+
+const buildPatientTemplateData = (patient, prefillContext) => {
+  const templateData = {};
+
+  if (patient && typeof patient === "object") {
+    Object.entries(patient).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+
+      templateData[key] = value;
+      templateData[String(key).toLowerCase()] = value;
+      templateData[toSnakeCase(key)] = value;
+    });
+  }
+
+  if (prefillContext?.firstName) {
+    templateData.first_name = prefillContext.firstName;
+    templateData.firstname = prefillContext.firstName;
+    templateData.firstName = prefillContext.firstName;
+  }
+
+  if (prefillContext?.lastName) {
+    templateData.last_name = prefillContext.lastName;
+    templateData.lastname = prefillContext.lastName;
+    templateData.lastName = prefillContext.lastName;
+  }
+
+  return templateData;
+};
+
+const interpolatePatientTemplateValue = (value, patientTemplateData) =>
+  String(value ?? "").replace(/<([^<>]+)>/g, (match, token) => {
+    const normalizedToken = String(token ?? "").trim();
+    if (!normalizedToken) return "";
+
+    const candidateKeys = [
+      normalizedToken,
+      normalizedToken.toLowerCase(),
+      toSnakeCase(normalizedToken),
+    ];
+
+    for (const candidateKey of candidateKeys) {
+      if (Object.prototype.hasOwnProperty.call(patientTemplateData, candidateKey)) {
+        const resolvedValue = patientTemplateData[candidateKey];
+        return resolvedValue === undefined || resolvedValue === null ? "" : String(resolvedValue);
+      }
+    }
+
+    return match;
+  });
+
+const renderAgreementTextWithBreaks = (value, patientTemplateData, keyPrefix) => {
+  const interpolatedText = interpolatePatientTemplateValue(value, patientTemplateData);
+  const lines = interpolatedText.split(/<br\s*\/?\s*>/i);
+
+  return lines.map((line, index) => (
+    <React.Fragment key={`${keyPrefix}-${index}`}>
+      {index > 0 ? <br /> : null}
+      {line}
+    </React.Fragment>
+  ));
+};
+
+const formatDateMmDdYyyy = (value = new Date()) => {
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  const year = String(value.getFullYear());
+  return `${month}/${day}/${year}`;
+};
+
+const sanitizePdfFilename = (value, fallback = "signature_agreement") => {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+
+  return normalized || fallback;
+};
+
+const getPresignedUploadErrorMessage = (error, label = "Document upload") => {
+  const message = String(error?.message || "");
+  if (error instanceof TypeError || /Failed to fetch/i.test(message)) {
+    const browserOrigin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "the current origin";
+    return `${label} was blocked by S3 CORS policy. Configure the S3 bucket to allow OPTIONS and PUT from ${browserOrigin}, including the Content-Type header.`;
+  }
+
+  return message || `${label} failed.`;
+};
+
+const AgreementDocumentContent = ({
+  agreementDefinition,
+  displayDocumentName,
+  patientData,
+  includeSignatureSection = false,
+  questionText = "",
+  signatureDataUrl = "",
+  fullName = "",
+  dateText = "",
+}) => {
+  const titleLineOne = getCaseInsensitiveValue(agreementDefinition, "title_1");
+  const titleLineTwo = getCaseInsensitiveValue(agreementDefinition, "title_2");
+  const summaryText = getCaseInsensitiveValue(agreementDefinition, "summary");
+  const headingEntries = getOrderedPrefixedEntries(agreementDefinition, "heading_");
+
+  return (
+    <div className="run-assessment-agreement-content">
+      <div className="run-assessment-agreement-content-page">
+        <div className="run-assessment-agreement-content-header">
+          <div className="run-assessment-agreement-content-title-primary">
+            {renderAgreementTextWithBreaks(
+              titleLineOne || displayDocumentName,
+              patientData,
+              "agreement-title-1"
+            )}
+          </div>
+          {titleLineTwo ? (
+            <div className="run-assessment-agreement-content-title-secondary">
+              {renderAgreementTextWithBreaks(
+                titleLineTwo,
+                patientData,
+                "agreement-title-2"
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {summaryText ? (
+          <div className="run-assessment-agreement-content-summary">
+            {renderAgreementTextWithBreaks(
+              summaryText,
+              patientData,
+              "agreement-summary"
+            )}
+          </div>
+        ) : null}
+
+        {headingEntries.map((headingEntry) => {
+          const headingValue =
+            headingEntry?.value && typeof headingEntry.value === "object"
+              ? headingEntry.value
+              : {};
+          const headingTitle = getCaseInsensitiveValue(headingValue, "title");
+          const numberedItems = getOrderedPrefixedEntries(headingValue, "number_item_");
+
+          return (
+            <section key={headingEntry.key} className="run-assessment-agreement-section">
+              {headingTitle ? (
+                <div className="run-assessment-agreement-section-title">
+                  {renderAgreementTextWithBreaks(
+                    headingTitle,
+                    patientData,
+                    `${headingEntry.key}-title`
+                  )}
+                </div>
+              ) : null}
+
+              <ol className="run-assessment-agreement-numbered-list">
+                {numberedItems.map((numberedItem) => {
+                  const itemValue =
+                    numberedItem?.value && typeof numberedItem.value === "object"
+                      ? numberedItem.value
+                      : {};
+                  const itemTitle = getCaseInsensitiveValue(itemValue, "title");
+                  const paragraphs = getOrderedPrefixedEntries(itemValue, "paragraph_");
+
+                  return (
+                    <li
+                      key={numberedItem.key}
+                      className="run-assessment-agreement-numbered-item"
+                      value={numberedItem.order}
+                    >
+                      {itemTitle ? (
+                        <div className="run-assessment-agreement-numbered-item-title">
+                          {renderAgreementTextWithBreaks(
+                            itemTitle,
+                            patientData,
+                            `${headingEntry.key}-${numberedItem.key}-title`
+                          )}
+                        </div>
+                      ) : null}
+
+                      <div className="run-assessment-agreement-numbered-item-body">
+                        {paragraphs.map((paragraphEntry) => (
+                          <p
+                            key={paragraphEntry.key}
+                            className="run-assessment-agreement-paragraph"
+                          >
+                            {renderAgreementTextWithBreaks(
+                              paragraphEntry.value,
+                              patientData,
+                              `${headingEntry.key}-${numberedItem.key}-${paragraphEntry.key}`
+                            )}
+                          </p>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          );
+        })}
+
+        {includeSignatureSection ? (
+          <section className="run-assessment-agreement-section run-assessment-agreement-signature-section">
+            <div className="run-assessment-agreement-section-title">SIGNATURE</div>
+            {questionText ? (
+              <p className="run-assessment-agreement-paragraph run-assessment-agreement-signature-copy">
+                {questionText}
+              </p>
+            ) : null}
+
+            <div className="run-assessment-agreement-signature-block">
+              {signatureDataUrl ? (
+                <div className="run-assessment-agreement-signature-image-wrap">
+                  <img
+                    src={signatureDataUrl}
+                    alt="Patient signature"
+                    className="run-assessment-agreement-signature-image"
+                  />
+                </div>
+              ) : null}
+              <div className="run-assessment-agreement-signature-label">Patient Signature</div>
+            </div>
+
+            <div className="run-assessment-agreement-printed-name-block">
+              <div className="run-assessment-agreement-printed-name-line">{fullName}</div>
+              <div className="run-assessment-agreement-signature-label">Printed Name</div>
+            </div>
+
+            <div className="run-assessment-agreement-date-line">Date: {dateText}</div>
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+const getPersistedAnswerPayload = (
+  question,
+  responseValue,
+  {
+    hasSubquestion = false,
+    subquestionSelections = {},
+  } = {}
+) => {
+  if (hasSubquestion && Array.isArray(responseValue)) {
+    return responseValue.map((item) => {
+      const itemIdentity = buildSelectableItemIdentity(item);
+      const selectedSubAnswer =
+        (itemIdentity && subquestionSelections?.[itemIdentity]) || item?.sub_answer || null;
+
+      if (!selectedSubAnswer) {
+        return {
+          ...item,
+        };
+      }
+
+      return {
+        ...item,
+        sub_answer: {
+          value: selectedSubAnswer?.value ?? null,
+          option: String(selectedSubAnswer?.option ?? ""),
+        },
+      };
+    });
+  }
+
   if (normalizeQuestionType(question) !== "signature_agreement") {
     return responseValue ?? null;
   }
@@ -102,7 +421,6 @@ const getPersistedAnswerPayload = (question, responseValue) => {
 
   return {
     ...normalizedResponse,
-    document_url: normalizeVideoUrl(question?.hyperlink ?? ""),
   };
 };
 
@@ -216,20 +534,51 @@ const toFiniteNumberOrNull = (value) => {
   return null;
 };
 
+const toApiDecimalString = (value, fractionDigits = 2) => {
+  const numericValue = toFiniteNumberOrNull(value);
+  if (numericValue === null) return "0";
+
+  const clampedFractionDigits = Math.max(0, Math.min(6, Number(fractionDigits) || 0));
+  return numericValue
+    .toFixed(clampedFractionDigits)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+};
+
+const shouldRetryPatientResponseCreateForAttemptField = (errorText) => {
+  const normalizedError = String(errorText ?? "").toLowerCase();
+  if (!normalizedError) return false;
+
+  return [
+    "attempt_id",
+    "assessment_attempt_id",
+    "patient_assessment_attempt_id",
+    "patient_assessment_attempt",
+    "unknown field",
+    "this field is required",
+  ].some((token) => normalizedError.includes(token));
+};
+
 const getScoreValueFromAnswer = (answerValue) => {
   if (!answerValue) return 0;
+
+  const getSubAnswerIncrement = (item) => {
+    const subAnswerValue = toFiniteNumberOrNull(item?.sub_answer?.value);
+    if (subAnswerValue === null) return 0;
+    return subAnswerValue * 0.1;
+  };
 
   if (Array.isArray(answerValue)) {
     return answerValue.reduce((total, item) => {
       if (!item) return total;
       const parsed = toFiniteNumberOrNull(item?.value);
-      return total + (parsed ?? 0);
+      return total + (parsed ?? 0) + getSubAnswerIncrement(item);
     }, 0);
   }
 
   if (typeof answerValue === "object") {
     const parsed = toFiniteNumberOrNull(answerValue?.value);
-    return parsed ?? 0;
+    return (parsed ?? 0) + getSubAnswerIncrement(answerValue);
   }
 
   return 0;
@@ -339,16 +688,7 @@ const hasPopulatedOptions = (options) => {
   return false;
 };
 
-const normalizeOptions = (question) => {
-  const questionTypeOptions = question?.question_type?.options;
-  const questionChoices = question?.choices;
-
-  const options = hasPopulatedOptions(questionChoices)
-    ? questionChoices
-    : hasPopulatedOptions(questionTypeOptions)
-      ? questionTypeOptions
-      : null;
-
+const normalizeOptionItems = (options) => {
   if (!options) return [];
 
   if (Array.isArray(options)) {
@@ -396,6 +736,88 @@ const normalizeOptions = (question) => {
   return [];
 };
 
+const normalizeOptions = (question) => {
+  const questionTypeOptions = question?.question_type?.options;
+  const questionChoices = question?.choices;
+
+  const options = hasPopulatedOptions(questionChoices)
+    ? questionChoices
+    : hasPopulatedOptions(questionTypeOptions)
+      ? questionTypeOptions
+      : null;
+
+  return normalizeOptionItems(options);
+};
+
+const getQuestionSectionValue = (questionSection, fieldName) =>
+  questionSection?.[fieldName] ?? questionSection?.question_section?.[fieldName] ?? null;
+
+const getQuestionSectionString = (questionSection, fieldName) =>
+  String(getQuestionSectionValue(questionSection, fieldName) ?? "").trim();
+
+const buildSelectableItemIdentity = (item) => {
+  if (item && typeof item === "object") {
+    const order = Number(item?.order);
+    if (Number.isFinite(order)) {
+      return `order:${order}`;
+    }
+
+    const optionLabel = String(item?.option ?? "").trim().toLowerCase();
+    if (optionLabel) {
+      return `option:${optionLabel}`;
+    }
+
+    const optionValue = String(item?.value ?? "").trim().toLowerCase();
+    return optionValue ? `value:${optionValue}` : "";
+  }
+
+  const primitiveOrder = Number(item);
+  if (Number.isFinite(primitiveOrder)) {
+    return `order:${primitiveOrder}`;
+  }
+
+  const primitiveText = String(item ?? "").trim().toLowerCase();
+  return primitiveText ? `option:${primitiveText}` : "";
+};
+
+const matchesSelectableOption = (item, optionItem) => {
+  const itemIdentity = buildSelectableItemIdentity(item);
+  const optionIdentity = buildSelectableItemIdentity(optionItem);
+  return Boolean(itemIdentity) && Boolean(optionIdentity) && itemIdentity === optionIdentity;
+};
+
+const getSubquestionSelectionsFromResponseValue = (responseValue) => {
+  if (!Array.isArray(responseValue)) return {};
+
+  return responseValue.reduce((accumulator, item) => {
+    const itemIdentity = buildSelectableItemIdentity(item);
+    const subAnswer = item?.sub_answer;
+
+    if (!itemIdentity || !subAnswer || typeof subAnswer !== "object") {
+      return accumulator;
+    }
+
+    return {
+      ...accumulator,
+      [itemIdentity]: {
+        option: String(subAnswer?.option ?? ""),
+        value: subAnswer?.value ?? subAnswer?.option ?? "",
+      },
+    };
+  }, {});
+};
+
+const buildSubquestionSelectionsByQuestionId = (responsesByQuestionId) =>
+  Object.entries(responsesByQuestionId ?? {}).reduce((accumulator, [questionKey, responseValue]) => {
+    const selections = getSubquestionSelectionsFromResponseValue(responseValue);
+    if (!Object.keys(selections).length) return accumulator;
+
+    return {
+      ...accumulator,
+      [questionKey]: selections,
+    };
+  }, {});
+
 const formatPhoneInput = (rawValue) => {
   const digits = String(rawValue ?? "").replace(/\D/g, "").slice(0, 10);
   if (!digits) return "";
@@ -425,25 +847,6 @@ const normalizeVideoUrl = (rawUrl) => {
 const isDirectVideoFileUrl = (urlValue) => {
   if (!urlValue) return false;
   return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(urlValue);
-};
-
-const getPdfFetchUrl = (rawUrl) => {
-  const normalized = normalizeVideoUrl(rawUrl);
-  if (!normalized) return "";
-
-  try {
-    const parsed = new URL(normalized);
-    const isLocalhost = typeof window !== "undefined" && window.location.hostname === "localhost";
-    const isValhallaDocsHost = /(^|\.)valhallahealthassessments\.com$/i.test(parsed.hostname);
-
-    if (isLocalhost && isValhallaDocsHost) {
-      return `/pdf-proxy${parsed.pathname}${parsed.search}`;
-    }
-
-    return normalized;
-  } catch {
-    return normalized;
-  }
 };
 
 const toEmbeddableVideoUrl = (rawUrl) => {
@@ -698,28 +1101,43 @@ const SignatureDrawField = ({ value, onChange, disabled = false }) => {
   );
 };
 
-const AgreementSignatureField = ({ value, onChange, documentUrl, documentName }) => {
+const AgreementSignatureField = ({
+  value,
+  onChange,
+  agreementSource,
+  documentName,
+  questionText,
+  patientData,
+  documentTypeId,
+  patientId,
+  companyId,
+  assessmentAttemptId,
+  uploadRequestFn,
+  onRegisterPdfExporter,
+  isRequired = false,
+  questionTextClassName = "run-assessment-question-text",
+}) => {
   const scrollRef = useRef(null);
-  const widthRef = useRef(null);
+  const exportSurfaceRef = useRef(null);
   const hasUserScrolledRef = useRef(false);
-  const [numPages, setNumPages] = useState(0);
-  const [pageWidth, setPageWidth] = useState(720);
-  const [documentLoadError, setDocumentLoadError] = useState("");
 
-  const normalizedValue = value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
+  const normalizedValue = useMemo(
+    () => (value && typeof value === "object" && !Array.isArray(value) ? value : {}),
+    [value]
+  );
   const signatureDataUrl = String(normalizedValue.signature_data_url ?? "");
   const fullName = String(normalizedValue.full_name ?? "");
   const hasViewedDocument = Boolean(normalizedValue.document_viewed);
-  const normalizedDocumentUrl = normalizeVideoUrl(documentUrl);
-  const documentFetchUrl = getPdfFetchUrl(documentUrl);
   const displayDocumentName = String(documentName ?? "").trim() || "Agreement Document";
-  const documentOptions = useMemo(() => ({
-    disableRange: true,
-    disableStream: true,
-    disableAutoFetch: true,
-  }), []);
+  const agreementDefinition = useMemo(
+    () => normalizeStructuredAgreementSource(agreementSource),
+    [agreementSource]
+  );
+  const hasAgreementContent = Boolean(agreementDefinition);
+  const dateText = useMemo(() => formatDateMmDdYyyy(), []);
+  const resolvedDocumentTypeId = Number(
+    documentTypeId ?? getCaseInsensitiveValue(agreementDefinition, "document_type_id") ?? 0
+  ) || null;
 
   const markDocumentViewedIfAtEnd = useCallback(() => {
     if (hasViewedDocument) return;
@@ -745,7 +1163,7 @@ const AgreementSignatureField = ({ value, onChange, documentUrl, documentName })
     });
   }, [fullName, hasViewedDocument, normalizedValue, onChange, signatureDataUrl]);
 
-  const markDocumentViewedFromOpen = useCallback(() => {
+  const markDocumentViewed = useCallback(() => {
     if (hasViewedDocument) return;
 
     onChange({
@@ -757,91 +1175,210 @@ const AgreementSignatureField = ({ value, onChange, documentUrl, documentName })
   }, [fullName, hasViewedDocument, normalizedValue, onChange, signatureDataUrl]);
 
   useEffect(() => {
-    const updatePageWidth = () => {
-      const containerWidth = widthRef.current?.clientWidth ?? 760;
-      const nextWidth = Math.max(280, Math.floor(containerWidth - 24));
-      setPageWidth(nextWidth);
-    };
+    if (!hasAgreementContent) return;
+    if (hasViewedDocument) return;
 
-    updatePageWidth();
-    window.addEventListener("resize", updatePageWidth);
-    return () => {
-      window.removeEventListener("resize", updatePageWidth);
-    };
-  }, []);
+    const scrollNode = scrollRef.current;
+    if (!scrollNode) return;
+
+    const hasVerticalOverflow = scrollNode.scrollHeight > scrollNode.clientHeight + 8;
+    if (!hasVerticalOverflow) {
+      markDocumentViewed();
+    }
+  }, [hasAgreementContent, hasViewedDocument, markDocumentViewed]);
 
   const handleDocumentScroll = () => {
     hasUserScrolledRef.current = true;
     markDocumentViewedIfAtEnd();
   };
 
+  useEffect(() => {
+    if (!onRegisterPdfExporter) return undefined;
+
+    onRegisterPdfExporter(async () => {
+      const sourceNode = exportSurfaceRef.current;
+      if (!sourceNode) return;
+
+      const clonedNode = sourceNode.cloneNode(true);
+      const wrapper = document.createElement("div");
+      wrapper.style.position = "fixed";
+      wrapper.style.left = "-10000px";
+      wrapper.style.top = "0";
+      wrapper.style.width = "900px";
+      wrapper.style.padding = "24px";
+      wrapper.style.background = "#ffffff";
+      wrapper.style.zIndex = "-1";
+      wrapper.appendChild(clonedNode);
+      document.body.appendChild(wrapper);
+
+      try {
+        const canvas = await html2canvas(wrapper, {
+          scale: 1.5,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+          windowWidth: wrapper.scrollWidth,
+          windowHeight: wrapper.scrollHeight,
+        });
+
+        const basePdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+        const pageWidth = basePdf.internal.pageSize.getWidth();
+        const renderedHeightMm = (canvas.height / canvas.width) * pageWidth;
+        const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageWidth, renderedHeightMm] });
+        const imgData = canvas.toDataURL("image/jpeg", 0.95);
+        pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, renderedHeightMm);
+
+        const resolvedPatientId = Number(patientId) || 1002;
+        const resolvedCompanyId = Number(companyId) || 1000;
+        const resolvedAttemptId = Number(assessmentAttemptId) || 46;
+        const fallbackFirstName =
+          String(patientData?.first_name ?? patientData?.firstName ?? "Mike").trim() || "Mike";
+        const fallbackLastName =
+          String(patientData?.last_name ?? patientData?.lastName ?? "Jones").trim() || "Jones";
+        const documentNameForUpload = [
+          "valhalla_lien_and_data_authorization",
+          sanitizePdfFilename(fallbackFirstName, "Mike"),
+          sanitizePdfFilename(fallbackLastName, "Jones"),
+          dateText.replace(/\//g, "-"),
+        ].join("_") + ".pdf";
+
+        const documentLinkRes = await uploadRequestFn(DOCUMENT_UPLOAD_GET_LINK_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patient_id: resolvedPatientId,
+            company_id: resolvedCompanyId,
+            document_type: resolvedDocumentTypeId,
+            assessment_attempt_id: resolvedAttemptId,
+            document_name: documentNameForUpload,
+          }),
+        });
+
+        if (!documentLinkRes.ok) {
+          const message = await documentLinkRes.text().catch(() => "");
+          throw new Error(
+            `Document link request failed (${documentLinkRes.status}) ${message}`
+          );
+        }
+
+        const documentLinkPayload = await documentLinkRes.json().catch(() => null);
+        const documentUrl = String(documentLinkPayload?.document_url ?? "").trim();
+        const patientDocumentId = Number(documentLinkPayload?.patient_document_id) || null;
+
+        if (!documentUrl || !patientDocumentId) {
+          throw new Error("Document upload link response is missing document_url or patient_document_id");
+        }
+
+        const pdfBlob = pdf.output("blob");
+        let uploadRes;
+
+        try {
+          uploadRes = await fetch(documentUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/pdf",
+            },
+            body: pdfBlob,
+          });
+        } catch (error) {
+          throw new Error(
+            getPresignedUploadErrorMessage(error, "Signature agreement upload")
+          );
+        }
+
+        if (!uploadRes.ok) {
+          const message = await uploadRes.text().catch(() => "");
+          throw new Error(`PDF upload failed (${uploadRes.status}) ${message}`);
+        }
+
+        onChange((prevValue) => ({
+          ...(prevValue && typeof prevValue === "object" && !Array.isArray(prevValue)
+            ? prevValue
+            : {}),
+          document_viewed: true,
+          signature_data_url: signatureDataUrl,
+          full_name: fullName,
+          patient_document_id: patientDocumentId,
+        }));
+
+        return patientDocumentId;
+      } catch (error) {
+        throw error;
+      } finally {
+        document.body.removeChild(wrapper);
+      }
+    });
+
+    return () => {
+      onRegisterPdfExporter(null);
+    };
+  }, [
+    dateText,
+    displayDocumentName,
+    fullName,
+    onRegisterPdfExporter,
+    onChange,
+    patientData,
+    patientId,
+    questionText,
+    resolvedDocumentTypeId,
+    companyId,
+    signatureDataUrl,
+    assessmentAttemptId,
+    uploadRequestFn,
+  ]);
+
   return (
     <div className="run-assessment-agreement-wrap">
       <div className="run-assessment-agreement-doc-card">
-        <div className="run-assessment-agreement-doc-header">
-          <div className="run-assessment-agreement-doc-title">{displayDocumentName}</div>
-          {normalizedDocumentUrl && (
-            <a
-              href={normalizedDocumentUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="run-assessment-agreement-doc-link"
-              onClick={markDocumentViewedFromOpen}
-            >
-              Open document
-            </a>
-          )}
-        </div>
-
         <div
           ref={scrollRef}
           className="run-assessment-agreement-doc-scroll"
           onScroll={handleDocumentScroll}
         >
-          <div ref={widthRef} className="run-assessment-agreement-doc-pages">
-            {!normalizedDocumentUrl ? (
+          <div className="run-assessment-agreement-doc-pages">
+            {!hasAgreementContent ? (
               <div className="run-assessment-video-empty">
-                No agreement document URL is configured for this question.
+                No agreement document content is configured for this question.
               </div>
             ) : (
-              <Document
-                file={documentFetchUrl}
-                options={documentOptions}
-                onLoadSuccess={({ numPages: nextPageCount }) => {
-                  setDocumentLoadError("");
-                  setNumPages(nextPageCount);
-                }}
-                onLoadError={(error) => {
-                  setNumPages(0);
-                  setDocumentLoadError(String(error?.message ?? "Unable to load PDF document."));
-                }}
-                loading={<div className="run-assessment-agreement-doc-loading">Loading document...</div>}
-              >
-                {Array.from({ length: numPages }, (_, index) => (
-                  <div key={`agreement-page-${index + 1}`} className="run-assessment-agreement-doc-page">
-                    <Page
-                      pageNumber={index + 1}
-                      width={pageWidth}
-                      renderAnnotationLayer={false}
-                      renderTextLayer={false}
-                    />
-                  </div>
-                ))}
-              </Document>
-            )}
-
-            {documentLoadError && (
-              <div className="run-assessment-video-empty">
-                Could not load this PDF. {documentLoadError}
-              </div>
+              <AgreementDocumentContent
+                agreementDefinition={agreementDefinition}
+                displayDocumentName={displayDocumentName}
+                patientData={patientData}
+              />
             )}
           </div>
         </div>
 
         <div className="run-assessment-agreement-scroll-note">
           {hasViewedDocument
-            ? "Document review complete. You can now sign below."
-            : "Scroll to the end of the document to unlock the signature fields."}
+            ? "Agreement review complete. You can now sign below."
+            : "Scroll to the end of the agreement to unlock the signature fields."}
+        </div>
+      </div>
+
+      <p className={questionTextClassName}>
+        {questionText || "No question text provided."}
+        {isRequired && (
+          <span className="run-assessment-required-marker" aria-label="required"> *</span>
+        )}
+      </p>
+
+      <div className="run-assessment-agreement-export-surface" aria-hidden="true">
+        <div ref={exportSurfaceRef} className="run-assessment-agreement-export-inner">
+          {hasAgreementContent ? (
+            <AgreementDocumentContent
+              agreementDefinition={agreementDefinition}
+              displayDocumentName={displayDocumentName}
+              patientData={patientData}
+              includeSignatureSection={true}
+              questionText={questionText}
+              signatureDataUrl={signatureDataUrl}
+              fullName={fullName}
+              dateText={dateText}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -1205,6 +1742,7 @@ export default function RunAssessment({
   forceConditionalSourceQuestionId = null,
   forceConditionalTargetSectionId = null,
   patientId = null,
+  patient = null,
   assessmentId = null,
   patientEventId = null,
   attemptIdOverride = null,
@@ -1226,16 +1764,28 @@ export default function RunAssessment({
   const youtubeMountNodeRef = useRef(null);
   const shellAnimationDurationMs = 319;
   const selectedCompany = getSelectedCompany();
+  const [resolvedPatient, setResolvedPatient] = useState(
+    patient && typeof patient === "object" ? patient : null
+  );
   const [attemptId, setAttemptId] = useState(null);
   const [isAttemptReady, setIsAttemptReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [signatureUploadError, setSignatureUploadError] = useState("");
   const [flowRules, setFlowRules] = useState([]);
   const [conditionalQuestionSectionsBySectionId, setConditionalQuestionSectionsBySectionId] = useState({});
   const [isConditionalFlowDataLoading, setIsConditionalFlowDataLoading] = useState(false);
   const [isResolvingRequestedStart, setIsResolvingRequestedStart] = useState(false);
+  const [subquestionSelectionsByQuestionId, setSubquestionSelectionsByQuestionId] = useState({});
+  const [activeSubquestionPopup, setActiveSubquestionPopup] = useState(null);
+  const currentSignaturePdfExporterRef = useRef(null);
+  const responsesRef = useRef({});
+  const subquestionSelectionsByQuestionIdRef = useRef({});
   const responseIdByQuestionIdRef = useRef({});
   const appliedStartRequestRef = useRef(null);
   const numericPatientId = Number(patientId);
+  const numericCompanyId = Number(
+    selectedCompany?.company_id ?? selectedCompany?.id ?? selectedCompany?.company?.company_id ?? 0
+  );
   const numericAssessmentId = Number(assessmentId);
   const numericPatientEventId = Number(patientEventId);
   const numericAttemptIdOverride = Number(attemptIdOverride);
@@ -1248,11 +1798,65 @@ export default function RunAssessment({
     );
   const canPersistAttempts = shouldPersistAssessmentResponses && hasAttemptContext;
 
+  useEffect(() => {
+    setResolvedPatient(patient && typeof patient === "object" ? patient : null);
+  }, [patient]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (patient && typeof patient === "object") return;
+    if (!Number.isFinite(numericPatientId) || numericPatientId <= 0) return;
+
+    let cancelled = false;
+
+    const fetchPatient = async () => {
+      try {
+        const response = await apiRequest(`${PATIENTS_API}${numericPatientId}/`);
+        if (!response.ok) return;
+
+        const patientPayload = await response.json().catch(() => null);
+        if (!cancelled && patientPayload && typeof patientPayload === "object") {
+          setResolvedPatient(patientPayload);
+        }
+      } catch {
+        // Best-effort hydration for agreement placeholder interpolation.
+      }
+    };
+
+    fetchPatient();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, numericPatientId, patient]);
+
   const getQuestionIdForItem = (item) =>
     Number(item?.question?.question_id ?? item?.questionSection?.question_id ?? 0) || 0;
 
   const getSectionIdForItem = (item) =>
     Number(item?.assessmentSectionId ?? item?.sectionId ?? 0) || 0;
+
+  const setResponsesWithRef = (valueOrUpdater) => {
+    const nextResponses =
+      typeof valueOrUpdater === "function"
+        ? valueOrUpdater(responsesRef.current)
+        : valueOrUpdater;
+
+    responsesRef.current = nextResponses;
+    setResponses(nextResponses);
+    return nextResponses;
+  };
+
+  const setSubquestionSelectionsWithRef = (valueOrUpdater) => {
+    const nextSelections =
+      typeof valueOrUpdater === "function"
+        ? valueOrUpdater(subquestionSelectionsByQuestionIdRef.current)
+        : valueOrUpdater;
+
+    subquestionSelectionsByQuestionIdRef.current = nextSelections;
+    setSubquestionSelectionsByQuestionId(nextSelections);
+    return nextSelections;
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -1488,6 +2092,11 @@ export default function RunAssessment({
     }
   }, [prefillData]);
 
+  const patientTemplateData = useMemo(
+    () => buildPatientTemplateData(resolvedPatient, prefillContext),
+    [prefillContext, resolvedPatient]
+  );
+
   useEffect(() => {
     if (!isOpen) {
       setIsAttemptReady(false);
@@ -1655,7 +2264,8 @@ export default function RunAssessment({
           setCurrentIndex(Math.max(0, basicStartIndex));
           setAttemptId(null);
           responseIdByQuestionIdRef.current = {};
-          setResponses({});
+          setResponsesWithRef({});
+          setSubquestionSelectionsWithRef({});
           setIsAttemptReady(true);
         }
         logInitPerf("no-persist");
@@ -1767,7 +2377,8 @@ export default function RunAssessment({
         if (!cancelled) {
           setAttemptId(resolvedAttemptId);
           setCurrentIndex(startIndex);
-          setResponses({});
+          setResponsesWithRef({});
+          setSubquestionSelectionsWithRef({});
           responseIdByQuestionIdRef.current = {};
           setIsAttemptReady(true);
         }
@@ -1785,11 +2396,16 @@ export default function RunAssessment({
           loadedResponses,
           loadedResponseIdByQuestionId,
         } = mapAttemptResponsesToState(attemptResponses);
+        const loadedSubquestionSelections = buildSubquestionSelectionsByQuestionId(loadedResponses);
 
         if (!cancelled) {
           // Keep any user-entered values that occurred before background load completed.
-          setResponses((prev) => ({
+          setResponsesWithRef((prev) => ({
             ...loadedResponses,
+            ...prev,
+          }));
+          setSubquestionSelectionsWithRef((prev) => ({
+            ...loadedSubquestionSelections,
             ...prev,
           }));
 
@@ -1809,7 +2425,8 @@ export default function RunAssessment({
           setAttemptId(null);
           responseIdByQuestionIdRef.current = {};
           setCurrentIndex(0);
-          setResponses({});
+          setResponsesWithRef({});
+          setSubquestionSelectionsWithRef({});
           setIsAttemptReady(true);
         }
         logInitPerf("failed");
@@ -2085,6 +2702,15 @@ export default function RunAssessment({
     currentItem?.questionSection,
     "has_subquestion"
   );
+  const currentSubQuestionPrompt = getQuestionSectionString(
+    currentItem?.questionSection,
+    "sub_question_prompt"
+  );
+  const currentSubQuestionType = getQuestionSectionValue(
+    currentItem?.questionSection,
+    "sub_question_type"
+  );
+  const currentSubQuestionOptions = normalizeOptionItems(currentSubQuestionType?.options);
   const currentSubQuestionTypeLabel = getQuestionSectionTypeLabel(
     currentItem?.questionSection,
     "sub_question_type"
@@ -2098,6 +2724,19 @@ export default function RunAssessment({
     isSignatureAgreementQuestion &&
     (!hasAgreementDocumentViewed || !hasAgreementSignatureDrawing || !hasAgreementSignatureName);
 
+  useEffect(() => {
+    setActiveSubquestionPopup(null);
+  }, [questionId]);
+
+  const currentQuestionSubquestionSelections =
+    subquestionSelectionsByQuestionId[questionId] ??
+    getSubquestionSelectionsFromResponseValue(currentResponse);
+
+  const activeSubquestionSelection =
+    activeSubquestionPopup && activeSubquestionPopup.questionId === questionId
+      ? currentQuestionSubquestionSelections[activeSubquestionPopup.parentOptionId] ?? null
+      : null;
+
   const persistResponseAndAttemptState = async ({
     targetIndex,
     status,
@@ -2107,17 +2746,25 @@ export default function RunAssessment({
 
     const questionNumericId = Number(questionId);
     const hasValidQuestionId = Number.isFinite(questionNumericId) && questionNumericId > 0;
-    const answerPayload = getPersistedAnswerPayload(question, currentResponse);
+    const currentResponseSnapshot = responsesRef.current[questionId] ?? currentResponse;
+    const currentSubquestionSelectionsSnapshot =
+      subquestionSelectionsByQuestionIdRef.current[questionId] ??
+      getSubquestionSelectionsFromResponseValue(currentResponseSnapshot);
+    const answerPayload = getPersistedAnswerPayload(question, currentResponseSnapshot, {
+      hasSubquestion: currentQuestionHasSubquestion,
+      subquestionSelections: currentSubquestionSelectionsSnapshot,
+    });
     const shouldIncludeScoreValue = toBooleanRequired(
       currentItem?.questionSection?.include_sum_total ??
       currentItem?.questionSection?.question_section?.include_sum_total ??
       false
     );
     const calculatedQuestionValue = getScoreValueFromAnswer(answerPayload);
-    const scoreValuePayload = shouldIncludeScoreValue
-      ? calculatedQuestionValue
-      : 0;
-    const calcValuePayload = calculatedQuestionValue ?? 0;
+    const scoreValuePayload = toApiDecimalString(
+      shouldIncludeScoreValue ? calculatedQuestionValue : 0,
+      2
+    );
+    const calcValuePayload = toApiDecimalString(calculatedQuestionValue ?? 0, 2);
 
     if (hasValidQuestionId) {
       const existingResponseId = responseIdByQuestionIdRef.current[questionNumericId] ?? null;
@@ -2127,7 +2774,8 @@ export default function RunAssessment({
         let lastErrorText = "";
         const failureDetails = [];
 
-        for (const payload of payloadCandidates) {
+        for (let index = 0; index < payloadCandidates.length; index += 1) {
+          const payload = payloadCandidates[index];
           const createRes = await requestFn(PATIENT_RESPONSES_API, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2150,6 +2798,15 @@ export default function RunAssessment({
             payload,
             error: lastErrorText,
           });
+
+          const shouldTryAlternateAttemptField =
+            index < payloadCandidates.length - 1 &&
+            createRes.status === 400 &&
+            shouldRetryPatientResponseCreateForAttemptField(lastErrorText);
+
+          if (!shouldTryAlternateAttemptField) {
+            break;
+          }
         }
 
         throw new Error(
@@ -2219,7 +2876,7 @@ export default function RunAssessment({
 
         const createPayloadCandidates = [
           withOptionalContext({
-            assessment_attempt_id: attemptId,
+            attempt_id: attemptId,
             ...baseCreatePayload,
           }),
           withOptionalContext({
@@ -2227,15 +2884,15 @@ export default function RunAssessment({
             ...baseCreatePayload,
           }),
           withOptionalContext({
-            patient_assessment_attempt: attemptId,
+            assessment_attempt_id: attemptId,
             ...baseCreatePayload,
           }),
           withOptionalContext({
-            attempt_id: attemptId,
+            patient_assessment_attempt: attemptId,
             ...baseCreatePayload,
           }),
           {
-            assessment_attempt_id: attemptId,
+            attempt_id: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
             score_value: scoreValuePayload,
@@ -2249,14 +2906,14 @@ export default function RunAssessment({
             calc_value: calcValuePayload,
           },
           {
-            patient_assessment_attempt: attemptId,
+            assessment_attempt_id: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
             score_value: scoreValuePayload,
             calc_value: calcValuePayload,
           },
           {
-            attempt_id: attemptId,
+            patient_assessment_attempt: attemptId,
             question_id: questionNumericId,
             answer_value: answerPayload,
             score_value: scoreValuePayload,
@@ -2516,20 +3173,25 @@ export default function RunAssessment({
   };
 
   const setResponse = (value) => {
+    if (signatureUploadError) {
+      setSignatureUploadError("");
+    }
+
     const sourceQuestionId = Number(questionId);
     const sourceRule = highestPriorityRuleBySourceQuestionId.get(sourceQuestionId);
     let questionIdsToClear = [];
     let targetSectionIdToClear = null;
 
-    setResponses((prev) => {
+    setResponsesWithRef((prev) => {
+      const resolvedValue = typeof value === "function" ? value(prev[questionId]) : value;
       const next = {
         ...prev,
-        [questionId]: value,
+        [questionId]: resolvedValue,
       };
 
       if (!sourceRule) return next;
 
-      const matchedAfter = doesRuleMatchResponseValue(sourceRule, value);
+      const matchedAfter = doesRuleMatchResponseValue(sourceRule, resolvedValue);
 
       if (!matchedAfter) {
         const targetSectionId = getTargetSectionIdFromRule(sourceRule);
@@ -2553,6 +3215,13 @@ export default function RunAssessment({
     });
 
     if (questionIdsToClear.length) {
+      setSubquestionSelectionsWithRef((prev) => {
+        const next = { ...prev };
+        questionIdsToClear.forEach((id) => {
+          delete next[id];
+        });
+        return next;
+      });
       clearPersistedResponsesByQuestionIds(questionIdsToClear);
     }
 
@@ -2580,7 +3249,14 @@ export default function RunAssessment({
       .filter((id) => Number.isFinite(id) && id > 0);
 
     if (questionIdsToClear.length) {
-      setResponses((prev) => {
+      setResponsesWithRef((prev) => {
+        const next = { ...prev };
+        questionIdsToClear.forEach((id) => {
+          delete next[id];
+        });
+        return next;
+      });
+      setSubquestionSelectionsWithRef((prev) => {
         const next = { ...prev };
         questionIdsToClear.forEach((id) => {
           delete next[id];
@@ -2610,7 +3286,7 @@ export default function RunAssessment({
         const nextLastName = prefillContext?.lastName ?? "";
         if (!nextFirstName && !nextLastName) return;
 
-        setResponses((prev) => {
+        setResponsesWithRef((prev) => {
           const existing = prev[questionId];
           if (hasResponseValue(existing)) return prev;
 
@@ -2692,7 +3368,7 @@ export default function RunAssessment({
       if (prefillValue === undefined || prefillValue === null) return;
       if (typeof prefillValue === "string" && !prefillValue.trim()) return;
 
-      setResponses((prev) => {
+      setResponsesWithRef((prev) => {
         if (hasResponseValue(prev[questionId])) return prev;
         return {
           ...prev,
@@ -2745,6 +3421,11 @@ export default function RunAssessment({
         : "one-col";
   const scaleConfig = getScaleResponseConfig(questionType);
   const isScaleResponseQuestion = Boolean(scaleConfig);
+  const questionTextClassName = `run-assessment-question-text ${
+    isNoResponseQuestion || isScaleResponseQuestion
+      ? "run-assessment-question-text-normal"
+      : ""
+  }`;
 
   const companyName =
     selectedCompany?.company_name ??
@@ -3043,12 +3724,29 @@ export default function RunAssessment({
       isInvalidZipcodeResponse ||
       isIncompleteSignatureAgreement
     ) return;
+
+    if (signatureUploadError) {
+      setSignatureUploadError("");
+    }
+
     const nextIndex = Math.min(totalQuestions - 1, currentIndex + 1);
     if (nextIndex === currentIndex) return;
 
-    transitionToIndex(nextIndex, "forward");
-
     const perform = async () => {
+      if (isSignatureAgreementQuestion && currentSignaturePdfExporterRef.current) {
+        try {
+          await currentSignaturePdfExporterRef.current();
+        } catch (error) {
+          setSignatureUploadError(
+            getPresignedUploadErrorMessage(error, "Signature agreement upload")
+          );
+          console.error("Failed to upload signature agreement PDF", error);
+          return;
+        }
+      }
+
+      transitionToIndex(nextIndex, "forward");
+
       try {
         await clearConditionalResponsesForCurrentQuestionWhenFalse();
       } catch (error) {
@@ -3262,8 +3960,22 @@ export default function RunAssessment({
           <AgreementSignatureField
             value={currentResponse}
             onChange={setResponse}
-            documentUrl={String(question?.hyperlink ?? "")}
+            agreementSource={
+              question?.options ?? question?.choices ?? question?.question_type?.options ?? null
+            }
             documentName={String(question?.title ?? question?.question ?? "Agreement Document")}
+            questionText={question?.question}
+            patientData={patientTemplateData}
+            documentTypeId={getCaseInsensitiveValue(question?.choices, "document_type_id")}
+            patientId={numericPatientId || 1002}
+            companyId={numericCompanyId || 1000}
+            assessmentAttemptId={attemptId || numericAttemptIdOverride || 46}
+            uploadRequestFn={requestFn}
+            onRegisterPdfExporter={(exporter) => {
+              currentSignaturePdfExporterRef.current = exporter;
+            }}
+            isRequired={isCurrentQuestionRequired}
+            questionTextClassName={questionTextClassName}
           />
         );
       case "zipcode":
@@ -3470,79 +4182,79 @@ export default function RunAssessment({
         if (selectOptions.length > 0) {
           const selectedItems = Array.isArray(currentResponse) ? currentResponse : [];
 
-          const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
-
-          const buildOptionIdentity = (optionItem) => {
-            const order = Number(optionItem?.order);
-            if (Number.isFinite(order)) {
-              return `order:${order}`;
-            }
-
-            const optionLabel = normalizeText(optionItem?.option);
-            if (optionLabel) {
-              return `option:${optionLabel}`;
-            }
-
-            const optionValue = normalizeText(optionItem?.value);
-            return optionValue ? `value:${optionValue}` : "";
-          };
-
-          const buildItemIdentity = (item) => {
-            if (item && typeof item === "object") {
-              const order = Number(item?.order);
-              if (Number.isFinite(order)) {
-                return `order:${order}`;
-              }
-
-              const optionLabel = normalizeText(item?.option);
-              if (optionLabel) {
-                return `option:${optionLabel}`;
-              }
-
-              const optionValue = normalizeText(item?.value);
-              return optionValue ? `value:${optionValue}` : "";
-            }
-
-            const primitiveOrder = Number(item);
-            if (Number.isFinite(primitiveOrder)) {
-              return `order:${primitiveOrder}`;
-            }
-
-            const primitiveText = normalizeText(item);
-            return primitiveText ? `option:${primitiveText}` : "";
-          };
-
-          const matchesOption = (item, optionItem) => {
-            const itemIdentity = buildItemIdentity(item);
-            const optionIdentity = buildOptionIdentity(optionItem);
-            return Boolean(itemIdentity) && Boolean(optionIdentity) && itemIdentity === optionIdentity;
-          };
-
           const toggleOption = (optionItem) => {
             const optionOrder = Number(optionItem.order);
+            const parentOptionId = buildSelectableItemIdentity(optionItem);
+            const exists = selectedItems.some((item) => matchesSelectableOption(item, optionItem));
 
-            setResponse((() => {
-              const exists = selectedItems.some((item) => matchesOption(item, optionItem));
+            if (exists) {
+              setSubquestionSelectionsWithRef((prev) => {
+                const currentSelections = prev[questionId] ?? {};
+                if (!(parentOptionId in currentSelections)) return prev;
 
-              if (exists) {
-                return selectedItems.filter((item) => !matchesOption(item, optionItem));
+                const nextSelections = { ...currentSelections };
+                delete nextSelections[parentOptionId];
+
+                if (!Object.keys(nextSelections).length) {
+                  const next = { ...prev };
+                  delete next[questionId];
+                  return next;
+                }
+
+                return {
+                  ...prev,
+                  [questionId]: nextSelections,
+                };
+              });
+
+              if (
+                activeSubquestionPopup?.questionId === questionId &&
+                activeSubquestionPopup?.parentOptionId === parentOptionId
+              ) {
+                setActiveSubquestionPopup(null);
+              }
+
+              setResponse((prevResponse) => {
+                const currentItems = Array.isArray(prevResponse) ? prevResponse : [];
+                return currentItems.filter((item) => !matchesSelectableOption(item, optionItem));
+              });
+              return;
+            }
+
+            setResponse((prevResponse) => {
+              const currentItems = Array.isArray(prevResponse) ? prevResponse : [];
+              if (currentItems.some((item) => matchesSelectableOption(item, optionItem))) {
+                return currentItems;
               }
 
               return [
-                ...selectedItems,
+                ...currentItems,
                 {
                   order: optionOrder,
                   option: optionItem.option,
                   value: optionItem.value,
                 },
               ];
-            })());
+            });
+
+            if (currentQuestionHasSubquestion && currentSubQuestionOptions.length > 0) {
+              setActiveSubquestionPopup({
+                questionId,
+                parentOptionId,
+                parentOptionLabel: String(optionItem?.option ?? "").trim(),
+              });
+            }
           };
 
           return (
             <div className={`run-assessment-radio-group ${optionColumnClass}`}>
               {selectOptions.map((optionItem) => {
-                const checked = selectedItems.some((item) => matchesOption(item, optionItem));
+                const optionIdentity = buildSelectableItemIdentity(optionItem);
+                const checked = selectedItems.some((item) => matchesSelectableOption(item, optionItem));
+                const selectedSubquestionResponse =
+                  currentQuestionSubquestionSelections[optionIdentity] ??
+                  selectedItems.find((item) => matchesSelectableOption(item, optionItem))?.sub_answer ??
+                  null;
 
                 return (
                   <label className="run-assessment-radio-row" key={`${optionItem.order}-${optionItem.option}`}>
@@ -3552,7 +4264,14 @@ export default function RunAssessment({
                       checked={checked}
                       onChange={() => toggleOption(optionItem)}
                     />
-                    <span>{optionItem.option}</span>
+                    <span className="run-assessment-option-label-wrap">
+                      <span>{optionItem.option}</span>
+                      {checked && selectedSubquestionResponse?.option && (
+                        <span className="run-assessment-option-subquestion-answer">
+                          {selectedSubquestionResponse.option}
+                        </span>
+                      )}
+                    </span>
                   </label>
                 );
               })}
@@ -3736,22 +4455,110 @@ export default function RunAssessment({
               </h4>
             )}
 
-            <p
-              className={`run-assessment-question-text ${
-                isNoResponseQuestion || isScaleResponseQuestion
-                  ? "run-assessment-question-text-normal"
-                  : ""
-              }`}
-            >
-              {question?.question || "No question text provided."}
-              {isCurrentQuestionRequired && (
-                <span className="run-assessment-required-marker" aria-label="required"> *</span>
-              )}
-            </p>
+            {isSignatureAgreementQuestion ? (
+              <>
+                <div className="run-assessment-response-area">
+                  {renderResponseField()}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className={questionTextClassName}>
+                  {question?.question || "No question text provided."}
+                  {isCurrentQuestionRequired && (
+                    <span className="run-assessment-required-marker" aria-label="required"> *</span>
+                  )}
+                </p>
 
-            <div className="run-assessment-response-area">
-              {renderResponseField()}
-            </div>
+                <div className="run-assessment-response-area">
+                  {renderResponseField()}
+                </div>
+              </>
+            )}
+
+            {activeSubquestionPopup &&
+              activeSubquestionPopup.questionId === questionId &&
+              currentQuestionHasSubquestion &&
+              currentSubQuestionOptions.length > 0 && (
+                <div className="run-assessment-subquestion-overlay" role="presentation">
+                  <div
+                    className="run-assessment-subquestion-popup"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Subquestion prompt"
+                  >
+                    <div className="run-assessment-subquestion-popup-header">
+                      <div className="run-assessment-subquestion-popup-title">
+                        {activeSubquestionPopup.parentOptionLabel
+                          ? activeSubquestionPopup.parentOptionLabel
+                          : ""}
+                      </div>
+                    </div>
+
+                    <div className="run-assessment-subquestion-popup-prompt">
+                      {currentSubQuestionPrompt || "Please answer the follow-up question."}
+                    </div>
+
+                    <div className="run-assessment-subquestion-popup-options">
+                      {currentSubQuestionOptions.map((optionItem) => {
+                        const optionIdentity = buildSelectableItemIdentity(optionItem);
+                        const isSelected =
+                          buildSelectableItemIdentity(activeSubquestionSelection) === optionIdentity;
+
+                        return (
+                          <button
+                            type="button"
+                            key={`subquestion-${optionIdentity}`}
+                            className={`run-assessment-subquestion-option ${
+                              isSelected ? "run-assessment-subquestion-option-selected" : ""
+                            }`}
+                            onClick={() => {
+                              const nextSubAnswer = {
+                                value: optionItem?.value ?? optionItem?.option ?? "",
+                                option: String(optionItem?.option ?? ""),
+                              };
+
+                              setSubquestionSelectionsWithRef((prev) => ({
+                                ...prev,
+                                [questionId]: {
+                                  ...(prev[questionId] ?? {}),
+                                  [activeSubquestionPopup.parentOptionId]: {
+                                    order: Number(optionItem?.order),
+                                    option: String(optionItem?.option ?? ""),
+                                    value: optionItem?.value ?? optionItem?.option ?? "",
+                                  },
+                                },
+                              }));
+
+                              setResponse((prevResponse) => {
+                                const currentItems = Array.isArray(prevResponse) ? prevResponse : [];
+                                return currentItems.map((item) =>
+                                  buildSelectableItemIdentity(item) === activeSubquestionPopup.parentOptionId
+                                    ? {
+                                        ...item,
+                                        sub_answer: nextSubAnswer,
+                                      }
+                                    : item
+                                );
+                              });
+
+                              setActiveSubquestionPopup(null);
+                            }}
+                          >
+                            {optionItem.option}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            {signatureUploadError ? (
+              <div className="run-assessment-inline-error" role="alert">
+                {signatureUploadError}
+              </div>
+            ) : null}
 
             <div className="run-assessment-nav">
               <button

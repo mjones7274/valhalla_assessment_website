@@ -614,9 +614,12 @@ export default function TakeAssessment() {
       }
       assessmentId={assessmentId}
       patientId={patientId}
+      patient={attempt?.patient ?? null}
       patientEventId={patientEventId}
       attemptIdOverride={attemptIdOverride}
       prefillData={{
+        first_name: attempt?.patient?.first_name ?? null,
+        last_name: attempt?.patient?.last_name ?? null,
         dob: attempt?.patient?.dob ?? attempt?.patient_dob ?? null,
         event_date:
           attempt?.patient_event?.event_date ??

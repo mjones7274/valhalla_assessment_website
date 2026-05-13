@@ -150,6 +150,168 @@ const extractOptionValues = (answerValue) => {
   return [];
 };
 
+const extractTimelinePills = (answerValue) => {
+  if (Array.isArray(answerValue)) {
+    return answerValue.flatMap((entry) => extractTimelinePills(entry));
+  }
+
+  if (answerValue && typeof answerValue === "object") {
+    if (Object.prototype.hasOwnProperty.call(answerValue, "option")) {
+      const label = String(answerValue.option ?? "").trim();
+      const subLabel = String(answerValue?.sub_answer?.option ?? "").trim();
+      const parsedSubValue = Number(answerValue?.sub_answer?.value);
+      return label
+        ? [{
+            label,
+            subLabel,
+            subValue: Number.isFinite(parsedSubValue) ? parsedSubValue : null,
+          }]
+        : [];
+    }
+
+    return Object.values(answerValue).flatMap((entry) => extractTimelinePills(entry));
+  }
+
+  return [];
+};
+
+const getUniqueTimelinePills = (answerValue) => {
+  const pillMap = new Map();
+
+  extractTimelinePills(answerValue).forEach((pill) => {
+    const key = String(pill?.label ?? "").trim();
+    if (!key) return;
+
+    const existing = pillMap.get(key);
+    const nextSubLabel = String(pill?.subLabel ?? "").trim();
+    const nextSubValue = Number.isFinite(Number(pill?.subValue)) ? Number(pill.subValue) : null;
+
+    if (!existing) {
+      pillMap.set(key, {
+        label: key,
+        subLabel: nextSubLabel,
+        subValue: nextSubValue,
+      });
+      return;
+    }
+
+    const existingSubValue = Number.isFinite(Number(existing?.subValue)) ? Number(existing.subValue) : null;
+    const shouldReplaceForHigherValue =
+      nextSubValue !== null && (existingSubValue === null || nextSubValue > existingSubValue);
+
+    if (shouldReplaceForHigherValue) {
+      pillMap.set(key, {
+        ...existing,
+        subLabel: nextSubLabel,
+        subValue: nextSubValue,
+      });
+      return;
+    }
+
+    if (!existing.subLabel && nextSubLabel) {
+      pillMap.set(key, {
+        ...existing,
+        subLabel: nextSubLabel,
+      });
+    }
+  });
+
+  return Array.from(pillMap.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, undefined, { sensitivity: "base" })
+  );
+};
+
+const getTimelinePillValueMap = (pillValues) => {
+  const valueMap = new Map();
+
+  (pillValues || []).forEach((pill) => {
+    const label = String(pill?.label ?? "").trim();
+    if (!label) return;
+
+    const numericSubValue = Number(pill?.subValue);
+    valueMap.set(label, Number.isFinite(numericSubValue) ? numericSubValue : null);
+  });
+
+  return valueMap;
+};
+
+const getIncreasedTimelineHighlightSet = (currentPills, previousPills) => {
+  const previousValueMap = getTimelinePillValueMap(previousPills);
+
+  return new Set(
+    (currentPills || [])
+      .filter((pill) => previousValueMap.has(pill.label))
+      .map((pill) => {
+        const currentValue = Number(pill?.subValue);
+        const previousValue = previousValueMap.get(pill.label);
+
+        if (!Number.isFinite(currentValue) || !Number.isFinite(previousValue)) {
+          return null;
+        }
+
+        return currentValue > previousValue ? pill.label : null;
+      })
+      .filter(Boolean)
+  );
+};
+
+const getTimelinePillLabelSet = (pillValues) => new Set(
+  (pillValues || [])
+    .map((pill) => String(pill?.label ?? "").trim())
+    .filter(Boolean)
+);
+
+const getNewTimelineHighlightSetWithFallback = (
+  currentPills,
+  primaryPreviousPills,
+  fallbackPreviousPills
+) => {
+  const primaryLabelSet = getTimelinePillLabelSet(primaryPreviousPills);
+  const fallbackLabelSet = getTimelinePillLabelSet(fallbackPreviousPills);
+
+  return new Set(
+    (currentPills || [])
+      .map((pill) => String(pill?.label ?? "").trim())
+      .filter(Boolean)
+      .filter(
+        (label) => !primaryLabelSet.has(label) && !fallbackLabelSet.has(label)
+      )
+  );
+};
+
+const getIncreasedTimelineHighlightSetWithFallback = (
+  currentPills,
+  primaryPreviousPills,
+  fallbackPreviousPills
+) => {
+  const primaryValueMap = getTimelinePillValueMap(primaryPreviousPills);
+  const fallbackValueMap = getTimelinePillValueMap(fallbackPreviousPills);
+
+  return new Set(
+    (currentPills || [])
+      .map((pill) => {
+        const label = String(pill?.label ?? "").trim();
+        if (!label) return null;
+
+        const currentValue = Number(pill?.subValue);
+        if (!Number.isFinite(currentValue)) return null;
+
+        const comparisonValue = primaryValueMap.has(label)
+          ? primaryValueMap.get(label)
+          : fallbackValueMap.has(label)
+            ? fallbackValueMap.get(label)
+            : null;
+
+        if (!Number.isFinite(comparisonValue)) {
+          return null;
+        }
+
+        return currentValue > comparisonValue ? label : null;
+      })
+      .filter(Boolean)
+  );
+};
+
 const extractReportVerbiageValues = (answerValue) => {
   if (Array.isArray(answerValue)) {
     return answerValue.flatMap((entry) => extractReportVerbiageValues(entry));
@@ -663,25 +825,68 @@ function TimelineGroup({ group }) {
         {group.summaryPills?.length ? (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "14px" }}>
             {group.summaryPills.map((pill) => {
-              const isHighlighted = Boolean(group.highlightedPillSet?.has(pill));
+              const pillLabel = typeof pill === "string" ? pill : String(pill?.label ?? "").trim();
+              const pillSubLabel =
+                pill && typeof pill === "object" ? String(pill?.subLabel ?? "").trim() : "";
+              const isNewlyHighlighted = Boolean(group.newHighlightedPillSet?.has(pillLabel));
+              const isValueIncreaseHighlighted = Boolean(group.increaseHighlightedPillSet?.has(pillLabel));
+              const isHighlighted = isNewlyHighlighted || isValueIncreaseHighlighted;
+              const background = isNewlyHighlighted
+                ? "rgba(251, 191, 36, 0.18)"
+                : isValueIncreaseHighlighted
+                  ? "rgba(96, 165, 250, 0.18)"
+                  : "rgba(125, 211, 252, 0.08)";
+              const border = isNewlyHighlighted
+                ? "1px solid rgba(251, 191, 36, 0.45)"
+                : isValueIncreaseHighlighted
+                  ? "1px solid rgba(96, 165, 250, 0.4)"
+                  : "1px solid rgba(125, 211, 252, 0.18)";
+              const color = isNewlyHighlighted
+                ? "#fde68a"
+                : isValueIncreaseHighlighted
+                  ? "#dbeafe"
+                  : "#dbeafe";
+              const subLabelColor = isNewlyHighlighted
+                ? "rgba(254, 243, 199, 0.88)"
+                : isValueIncreaseHighlighted
+                  ? "#fde68a"
+                  : "rgba(219, 234, 254, 0.78)";
 
               return (
                 <div
-                  key={`${group.title}-${pill}`}
+                  key={`${group.title}-${pillLabel}-${pillSubLabel}`}
                   style={{
                     display: "inline-flex",
-                    alignItems: "center",
-                    padding: "6px 10px",
-                    borderRadius: "999px",
-                    background: isHighlighted ? "rgba(251, 191, 36, 0.18)" : "rgba(125, 211, 252, 0.08)",
-                    border: isHighlighted ? "1px solid rgba(251, 191, 36, 0.45)" : "1px solid rgba(125, 211, 252, 0.18)",
-                    color: isHighlighted ? "#fde68a" : "#dbeafe",
-                    fontSize: "0.76rem",
-                    fontWeight: 700,
-                    boxShadow: isHighlighted ? "inset 0 0 0 1px rgba(245, 158, 11, 0.12)" : "none",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: pillSubLabel ? "2px" : 0,
+                    padding: pillSubLabel ? "6px 10px 7px" : "6px 10px",
+                    borderRadius: "14px",
+                    background,
+                    border,
+                    color,
+                    boxShadow: isNewlyHighlighted
+                      ? "inset 0 0 0 1px rgba(245, 158, 11, 0.12)"
+                      : isValueIncreaseHighlighted
+                        ? "inset 0 0 0 1px rgba(59, 130, 246, 0.12)"
+                        : "none",
                   }}
                 >
-                  {pill}
+                  <span style={{ fontSize: "0.76rem", fontWeight: 700, lineHeight: 1.2 }}>
+                    {pillLabel}
+                  </span>
+                  {pillSubLabel ? (
+                    <span
+                      style={{
+                        fontSize: "0.64rem",
+                        fontWeight: 500,
+                        lineHeight: 1.15,
+                        color: subLabelColor,
+                      }}
+                    >
+                      {pillSubLabel}
+                    </span>
+                  ) : null}
                 </div>
               );
             })}
@@ -977,21 +1182,28 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const selfReportedAocPrimaryCalcValue = getResponseCalcValue(selfReportedAocPrimaryResponse);
   const selfReportedAocSecondaryCalcValue = getResponseCalcValue(selfReportedAocSecondaryResponse);
   const witnessedAocCalcValue = getResponseCalcValue(witnessedAocResponse);
-  const baselineOptionSet = new Set(extractOptionValues(getResponseAnswerValue(baselineResponse)));
-  const preInjurySymptomPills = Array.from(
-    new Set(extractOptionValues(getResponseAnswerValue(baselineResponse)))
-  ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-  const symptomsWithin72HoursPills = Array.from(
-    new Set(extractOptionValues(getResponseAnswerValue(acuteResponse)))
-  ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-  const persistingSymptomsPills = Array.from(
-    new Set(extractOptionValues(getResponseAnswerValue(currentResponse)))
-  ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-  const symptomsWithin72HoursHighlightedSet = new Set(
-    symptomsWithin72HoursPills.filter((optionValue) => !baselineOptionSet.has(optionValue))
+  const preInjurySymptomPills = getUniqueTimelinePills(getResponseAnswerValue(baselineResponse));
+  const symptomsWithin72HoursPills = getUniqueTimelinePills(getResponseAnswerValue(acuteResponse));
+  const persistingSymptomsPills = getUniqueTimelinePills(getResponseAnswerValue(currentResponse));
+  const baselineOptionSet = getTimelinePillLabelSet(preInjurySymptomPills);
+  const symptomsWithin72HoursNewOptionSet = new Set(
+    symptomsWithin72HoursPills
+      .map((pill) => pill.label)
+      .filter((optionValue) => !baselineOptionSet.has(optionValue))
   );
-  const persistingSymptomsHighlightedSet = new Set(
-    persistingSymptomsPills.filter((optionValue) => !baselineOptionSet.has(optionValue))
+  const symptomsWithin72HoursIncreasedSet = getIncreasedTimelineHighlightSet(
+    symptomsWithin72HoursPills,
+    preInjurySymptomPills
+  );
+  const persistingSymptomsNewOptionSet = getNewTimelineHighlightSetWithFallback(
+    persistingSymptomsPills,
+    symptomsWithin72HoursPills,
+    preInjurySymptomPills
+  );
+  const persistingSymptomsIncreasedSet = getIncreasedTimelineHighlightSetWithFallback(
+    persistingSymptomsPills,
+    symptomsWithin72HoursPills,
+    preInjurySymptomPills
   );
   const acuteNewOptionTally = extractOptionValues(getResponseAnswerValue(acuteResponse)).filter(
     (optionValue) => !baselineOptionSet.has(optionValue)
@@ -999,6 +1211,8 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const currentAboveBaselineTally = extractOptionValues(getResponseAnswerValue(currentResponse)).filter(
     (optionValue) => !baselineOptionSet.has(optionValue)
   ).length;
+  const acuteIncreasedSubOptionTally = symptomsWithin72HoursIncreasedSet.size;
+  const currentIncreasedSubOptionTally = persistingSymptomsIncreasedSet.size;
   const selfReportedLocSecondaryOptionList = formatOptionList(
     extractReportVerbiageValues(getResponseAnswerValue(selfReportedLocSecondaryResponse))
   );
@@ -1097,7 +1311,8 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
     if (group.title === "Symptoms Within 72 Hours of Injury") {
       return {
         ...group,
-        highlightedPillSet: symptomsWithin72HoursHighlightedSet,
+        newHighlightedPillSet: symptomsWithin72HoursNewOptionSet,
+        increaseHighlightedPillSet: symptomsWithin72HoursIncreasedSet,
         summaryCount: formatSymptomCount(symptomsWithin72HoursPills),
         summaryPills: symptomsWithin72HoursPills,
       };
@@ -1106,7 +1321,8 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
     if (group.title === "Persisting, Worsening, or Newly Emerged Symptoms") {
       return {
         ...group,
-        highlightedPillSet: persistingSymptomsHighlightedSet,
+        newHighlightedPillSet: persistingSymptomsNewOptionSet,
+        increaseHighlightedPillSet: persistingSymptomsIncreasedSet,
         summaryCount: formatSymptomCount(persistingSymptomsPills),
         summaryPills: persistingSymptomsPills,
       };
@@ -1251,7 +1467,14 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
               >
                 <div style={{ ...(highlightAcuteSummaryCard ? { color: "#fde68a" } : mutedTextStyle), fontWeight: 700, fontSize: "0.9rem" }}>ACUTE (WITHIN 72 HOURS)</div>
                 <div style={{ color: highlightAcuteSummaryCard ? "#fef3c7" : "#ffffff", fontWeight: 900, fontSize: "2.2rem", lineHeight: 1 }}>{acuteCalcValue}</div>
-                <div style={{ ...(highlightAcuteSummaryCard ? { color: "#fcd34d" } : mutedTextStyle), fontSize: "0.8rem" }}>{`+${acuteNewOptionTally} new after injury`}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
+                  <div style={{ ...(highlightAcuteSummaryCard ? { color: "#fcd34d" } : mutedTextStyle), fontSize: "0.8rem" }}>{`+${acuteNewOptionTally} new after injury`}</div>
+                  {acuteIncreasedSubOptionTally > 0 ? (
+                    <div style={{ ...(highlightAcuteSummaryCard ? { color: "#fde68a" } : mutedTextStyle), fontSize: "0.72rem" }}>
+                      {`+${acuteIncreasedSubOptionTally} increased symptom occurrence`}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div
                 style={{
@@ -1274,8 +1497,15 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
               >
                 <div style={{ ...(highlightCurrentSummaryCard ? { color: "#fecaca" } : mutedTextStyle), fontWeight: 700, fontSize: "0.9rem" }}>CURRENT / ONGOING</div>
                 <div style={{ color: highlightCurrentSummaryCard ? "#fee2e2" : "#ffffff", fontWeight: 900, fontSize: "2.2rem", lineHeight: 1 }}>{currentCalcValue}</div>
-                <div style={{ ...(highlightCurrentSummaryCard ? { color: "#fca5a5" } : mutedTextStyle), fontSize: "0.8rem" }}>
-                  {`${currentCalcValue} ${currentCalcValue === 1 ? "Symptom progressing" : "Symptoms progressing"}`}
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
+                  <div style={{ ...(highlightCurrentSummaryCard ? { color: "#fca5a5" } : mutedTextStyle), fontSize: "0.8rem" }}>
+                    {`${currentCalcValue} ${currentCalcValue === 1 ? "Symptom progressing" : "Symptoms progressing"}`}
+                  </div>
+                  {currentIncreasedSubOptionTally > 0 ? (
+                    <div style={{ ...(highlightCurrentSummaryCard ? { color: "#fecaca" } : mutedTextStyle), fontSize: "0.72rem" }}>
+                      {`+${currentIncreasedSubOptionTally} increased symptom occurrence`}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

@@ -17,6 +17,28 @@ const calculationRuleFieldOrder = ["rule_id", "type", "qid_1", "qid_2"];
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const normalizeQuestionTypeDescription = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const isSignatureAgreementQuestionType = (questionTypeId, description) =>
+  Number(questionTypeId) === 33 ||
+  normalizeQuestionTypeDescription(description) === "signature_agreement";
+
+const serializeQuestionChoicesJson = (choices) => {
+  if (typeof choices === "string") {
+    try {
+      return JSON.stringify(JSON.parse(choices), null, 2);
+    } catch {
+      return choices;
+    }
+  }
+
+  return JSON.stringify(choices ?? [], null, 2);
+};
+
 const renderHighlightedDescriptionText = (text, labels) => {
   const normalizedText = String(text ?? "");
   const filteredLabels = Array.from(
@@ -175,10 +197,26 @@ function AssessmentDetails() {
 
             return {
               ...questionSection,
+              is_required:
+                mergedRow?.is_required ??
+                mergedRow?.question_section?.is_required ??
+                questionSection?.is_required,
               include_sum_total:
                 mergedRow?.include_sum_total ??
                 mergedRow?.question_section?.include_sum_total ??
                 questionSection?.include_sum_total,
+              has_subquestion:
+                mergedRow?.has_subquestion ??
+                mergedRow?.question_section?.has_subquestion ??
+                questionSection?.has_subquestion,
+              sub_question_type:
+                mergedRow?.sub_question_type ??
+                mergedRow?.question_section?.sub_question_type ??
+                questionSection?.sub_question_type,
+              sub_question_prompt:
+                mergedRow?.sub_question_prompt ??
+                mergedRow?.question_section?.sub_question_prompt ??
+                questionSection?.sub_question_prompt,
               unique_calculation:
                 mergedRow?.unique_calculation ??
                 mergedRow?.question_section?.unique_calculation ??
@@ -642,7 +680,8 @@ function AssessmentDetails() {
     includeSumTotal,
     uniqueCalculation,
     hasSubquestion,
-    subQuestionType
+    subQuestionType,
+    subQuestionPrompt
   ) => {
     try {
       // Load question
@@ -679,6 +718,10 @@ function AssessmentDetails() {
         matchingFlowRule?.target_section?.section_id ??
         matchingFlowRule?.target_section_id
       );
+      const isSignatureAgreement = isSignatureAgreementQuestionType(
+        questionData?.question_type?.question_type_id,
+        questionData?.question_type?.description
+      );
 
       setEditingQuestion({
         question_id: questionData.question_id,
@@ -695,6 +738,7 @@ function AssessmentDetails() {
             ? parsedSubQuestionType
             : "";
         })(),
+        sub_question_prompt: String(subQuestionPrompt ?? ""),
         title: questionData.title,
         question: questionData.question,
         hyperlink: questionData.hyperlink || "",
@@ -702,19 +746,24 @@ function AssessmentDetails() {
         question_type_id: questionData.question_type.question_type_id,
         use_default_options: questionData.use_default_options,
 
-        choices: questionData.use_default_options
-          ? (questionData.question_type.options || []).map((opt) => ({
-              option: opt.option,
-              report_verbiage: opt.report_verbiage ?? "",
-              value: opt.value,
-              order: opt.order,
-            }))
-          : (questionData.choices || []).map((c) => ({
-              option: c.option,
-              report_verbiage: c.report_verbiage ?? "",
-              value: c.value,
-              order: c.order,
-            })),
+        choices: isSignatureAgreement
+          ? questionData.choices ?? []
+          : questionData.use_default_options
+            ? (questionData.question_type.options || []).map((opt) => ({
+                option: opt.option,
+                report_verbiage: opt.report_verbiage ?? "",
+                value: opt.value,
+                order: opt.order,
+              }))
+            : (questionData.choices || []).map((c) => ({
+                option: c.option,
+                report_verbiage: c.report_verbiage ?? "",
+                value: c.value,
+                order: c.order,
+              })),
+        choices_json: isSignatureAgreement
+          ? serializeQuestionChoicesJson(questionData.choices)
+          : "",
         conditional_response_enabled: Boolean(matchingFlowRule),
         conditional_response_option: hydratedConditionalOption,
         conditional_response_value: hydratedConditionalValue,
@@ -912,6 +961,10 @@ function AssessmentDetails() {
       questionSectionData?.sub_question_type ??
       newQuestion?.sub_question_type ??
       null;
+    const resolvedSubQuestionPrompt =
+      questionSectionData?.sub_question_prompt ??
+      newQuestion?.sub_question_prompt ??
+      "";
 
     setAssessmentDetails((prev) => ({
       ...prev,
@@ -931,6 +984,7 @@ function AssessmentDetails() {
                     unique_calculation: resolvedUniqueCalculation,
                     has_subquestion: resolvedHasSubquestion,
                     sub_question_type: resolvedSubQuestionType,
+                    sub_question_prompt: resolvedSubQuestionPrompt,
                     question: {
                       ...newQuestion,
                       question_type: hydratedQuestionType, // ✅ THIS is the fix
@@ -976,8 +1030,29 @@ function AssessmentDetails() {
         uniqueCalculation,
         hasSubquestion,
         subQuestionType,
+        subQuestionPrompt,
       }
     ) => {
+      const resolvedSubQuestionType = (() => {
+        if (!hasSubquestion) return null;
+
+        if (subQuestionType && typeof subQuestionType === "object") {
+          return subQuestionType;
+        }
+
+        const parsedSubQuestionTypeId = Number(subQuestionType);
+        if (!Number.isFinite(parsedSubQuestionTypeId) || parsedSubQuestionTypeId <= 0) {
+          return null;
+        }
+
+        return (
+          questionTypes.find(
+            (questionType) =>
+              Number(questionType?.question_type_id) === parsedSubQuestionTypeId
+          ) || parsedSubQuestionTypeId
+        );
+      })();
+
       setAssessmentDetails((prev) => {
         if (!prev) return prev;
 
@@ -991,11 +1066,24 @@ function AssessmentDetails() {
                 qs.question_section_id === questionSectionId
                   ? {
                       ...qs,
+                      question_section:
+                        qs?.question_section && typeof qs.question_section === "object"
+                          ? {
+                              ...qs.question_section,
+                              is_required: Boolean(isRequired),
+                              include_sum_total: Boolean(includeSumTotal),
+                              unique_calculation: Boolean(uniqueCalculation),
+                              has_subquestion: Boolean(hasSubquestion),
+                              sub_question_type: resolvedSubQuestionType,
+                              sub_question_prompt: subQuestionPrompt ?? "",
+                            }
+                          : qs?.question_section,
                       is_required: Boolean(isRequired),
                       include_sum_total: Boolean(includeSumTotal),
                       unique_calculation: Boolean(uniqueCalculation),
                       has_subquestion: Boolean(hasSubquestion),
-                      sub_question_type: subQuestionType ?? null,
+                      sub_question_type: resolvedSubQuestionType,
+                      sub_question_prompt: subQuestionPrompt ?? "",
                     }
                   : qs
               ),
@@ -1012,11 +1100,25 @@ function AssessmentDetails() {
             questionSection.question_section_id === questionSectionId
               ? {
                   ...questionSection,
+                  question_section:
+                    questionSection?.question_section &&
+                    typeof questionSection.question_section === "object"
+                      ? {
+                          ...questionSection.question_section,
+                          is_required: Boolean(isRequired),
+                          include_sum_total: Boolean(includeSumTotal),
+                          unique_calculation: Boolean(uniqueCalculation),
+                          has_subquestion: Boolean(hasSubquestion),
+                          sub_question_type: resolvedSubQuestionType,
+                          sub_question_prompt: subQuestionPrompt ?? "",
+                        }
+                      : questionSection?.question_section,
                   is_required: Boolean(isRequired),
                   include_sum_total: Boolean(includeSumTotal),
                   unique_calculation: Boolean(uniqueCalculation),
                   has_subquestion: Boolean(hasSubquestion),
-                  sub_question_type: subQuestionType ?? null,
+                  sub_question_type: resolvedSubQuestionType,
+                  sub_question_prompt: subQuestionPrompt ?? "",
                 }
               : questionSection
           );
@@ -1101,6 +1203,10 @@ function AssessmentDetails() {
         questionSectionData?.sub_question_type ??
         newQuestion?.sub_question_type ??
         null,
+      sub_question_prompt:
+        questionSectionData?.sub_question_prompt ??
+        newQuestion?.sub_question_prompt ??
+        "",
       question: {
         ...newQuestion,
         question_type: hydratedQuestionType,
@@ -2155,7 +2261,8 @@ const compareQuestionOrder = (left, right) => {
                                 getQuestionSectionBoolean(qs, "include_sum_total"),
                                 getQuestionSectionBoolean(qs, "unique_calculation"),
                                 getQuestionSectionBoolean(qs, "has_subquestion"),
-                                getQuestionSectionForeignKeyId(qs, "sub_question_type")
+                                getQuestionSectionForeignKeyId(qs, "sub_question_type"),
+                                qs?.sub_question_prompt ?? qs?.question_section?.sub_question_prompt ?? ""
                               )
                             }
                           />
@@ -2406,7 +2513,8 @@ const compareQuestionOrder = (left, right) => {
                                       getQuestionSectionBoolean(flowQuestionForRow, "include_sum_total"),
                                       getQuestionSectionBoolean(flowQuestionForRow, "unique_calculation"),
                                       getQuestionSectionBoolean(flowQuestionForRow, "has_subquestion"),
-                                      getQuestionSectionForeignKeyId(flowQuestionForRow, "sub_question_type")
+                                        getQuestionSectionForeignKeyId(flowQuestionForRow, "sub_question_type"),
+                                        flowQuestionForRow?.sub_question_prompt ?? flowQuestionForRow?.question_section?.sub_question_prompt ?? ""
                                     )
                                   }
                                 />
@@ -2581,6 +2689,7 @@ const compareQuestionOrder = (left, right) => {
                                   unique_calculation: false,
                                   has_subquestion: false,
                                   sub_question_type: "",
+                                  sub_question_prompt: "",
                                   title: "",
                                   question: "",
                                   hyperlink: "",
@@ -2795,7 +2904,8 @@ const compareQuestionOrder = (left, right) => {
                                     getQuestionSectionBoolean(flowQ, "include_sum_total"),
                                     getQuestionSectionBoolean(flowQ, "unique_calculation"),
                                     getQuestionSectionBoolean(flowQ, "has_subquestion"),
-                                    getQuestionSectionForeignKeyId(flowQ, "sub_question_type")
+                                    getQuestionSectionForeignKeyId(flowQ, "sub_question_type"),
+                                    flowQ?.sub_question_prompt ?? flowQ?.question_section?.sub_question_prompt ?? ""
                                   )
                                 }
                               />
@@ -2995,6 +3105,7 @@ const compareQuestionOrder = (left, right) => {
                                     unique_calculation: false,
                                     has_subquestion: false,
                                     sub_question_type: "",
+                                    sub_question_prompt: "",
                                   title: "",
                                   question: "",
                                   hyperlink: "",
@@ -3098,6 +3209,7 @@ const compareQuestionOrder = (left, right) => {
                         unique_calculation: false,
                         has_subquestion: false,
                         sub_question_type: "",
+                        sub_question_prompt: "",
                         title: "",
                         question: "",
                         hyperlink: "",
@@ -3680,12 +3792,14 @@ const compareQuestionOrder = (left, right) => {
                 const selectedType = questionTypes.find(
                   (qt) => qt.question_type_id === Number(editingQuestion.question_type_id)
                 );
-                const normalizedSelectedType = String(selectedType?.description ?? "")
-                  .trim()
-                  .toLowerCase()
-                  .replace(/[\s-]+/g, "_");
+                const normalizedSelectedType = normalizeQuestionTypeDescription(
+                  selectedType?.description
+                );
                 const isPerformTaskVideo = normalizedSelectedType === "perform_task_video";
-                const isSignatureAgreement = normalizedSelectedType === "signature_agreement";
+                const isSignatureAgreement = isSignatureAgreementQuestionType(
+                  editingQuestion.question_type_id,
+                  selectedType?.description
+                );
                 const parsedQuestionOrder = Number(editingQuestion.question_order);
                 const normalizedQuestionOrder =
                   Number.isFinite(parsedQuestionOrder) && parsedQuestionOrder > 0
@@ -3739,6 +3853,22 @@ const compareQuestionOrder = (left, right) => {
                 );
                 let resultingFlowRuleId = previousFlowRuleId;
                 let resultingFlowRuleMatchValue = previousMatchValue;
+                let serializedSignatureAgreementChoices = editingQuestion.choices;
+
+                if (isSignatureAgreement) {
+                  const rawChoicesJson = String(editingQuestion.choices_json ?? "").trim();
+
+                  if (!rawChoicesJson) {
+                    serializedSignatureAgreementChoices = [];
+                  } else {
+                    try {
+                      serializedSignatureAgreementChoices = JSON.parse(rawChoicesJson);
+                    } catch {
+                      window.alert("Signature agreement choices must be valid JSON.");
+                      return;
+                    }
+                  }
+                }
 
                 const payload = {
                   title: editingQuestion.title,
@@ -3748,7 +3878,9 @@ const compareQuestionOrder = (left, right) => {
                   use_default_options: editingQuestion.use_default_options,
                   choices: editingQuestion.use_default_options
                     ? []
-                    : editingQuestion.choices,
+                    : isSignatureAgreement
+                      ? serializedSignatureAgreementChoices
+                      : editingQuestion.choices,
                   ...(isPerformTaskVideo || isSignatureAgreement
                     ? { hyperlink: String(editingQuestion.hyperlink ?? "").trim() }
                     : {}),
@@ -3785,6 +3917,9 @@ const compareQuestionOrder = (left, right) => {
                           Number(editingQuestion.sub_question_type) > 0
                             ? Number(editingQuestion.sub_question_type)
                             : null,
+                        sub_question_prompt: Boolean(editingQuestion.has_subquestion)
+                          ? String(editingQuestion.sub_question_prompt ?? "")
+                          : "",
                       }),
                     }
                   );
@@ -3885,6 +4020,9 @@ const compareQuestionOrder = (left, right) => {
                             Number(editingQuestion.sub_question_type) > 0
                               ? Number(editingQuestion.sub_question_type)
                               : null,
+                          sub_question_prompt: Boolean(editingQuestion.has_subquestion)
+                            ? String(editingQuestion.sub_question_prompt ?? "")
+                            : "",
                         }),
                       }
                     );
@@ -3907,6 +4045,9 @@ const compareQuestionOrder = (left, right) => {
                           Number(editingQuestion.sub_question_type) > 0
                             ? Number(editingQuestion.sub_question_type)
                             : null,
+                        subQuestionPrompt: Boolean(editingQuestion.has_subquestion)
+                          ? String(editingQuestion.sub_question_prompt ?? "")
+                          : "",
                       }
                     );
 
@@ -3930,6 +4071,9 @@ const compareQuestionOrder = (left, right) => {
                                     Number(editingQuestion.sub_question_type) > 0
                                       ? Number(editingQuestion.sub_question_type)
                                       : null,
+                                  sub_question_prompt: Boolean(editingQuestion.has_subquestion)
+                                    ? String(editingQuestion.sub_question_prompt ?? "")
+                                    : "",
                                 }
                               : flowQ
                           )
