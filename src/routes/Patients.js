@@ -402,7 +402,9 @@ const formatAnswerValueForTable = (value) => {
       const optionText = formatAnswerValueForTable(value.option);
       const valueText = formatAnswerValueForTable(value.value);
       const primaryText = optionText !== "—" ? optionText : valueText;
-      const subAnswerOptionText = formatAnswerValueForTable(value?.sub_answer?.option);
+      const subAnswerOptionText = shouldShowStoredSubAnswer(value)
+        ? formatAnswerValueForTable(value?.sub_answer?.option)
+        : "—";
 
       if (primaryText === "—") {
         return subAnswerOptionText !== "—" ? `(${subAnswerOptionText})` : "—";
@@ -445,6 +447,29 @@ const hasSubAnswerValue = (value) => {
   }
 
   return false;
+};
+
+const shouldShowStoredSubAnswer = (value) => {
+  if (!value || typeof value !== "object") return false;
+
+  const rawMainValue = value?.value;
+  const numericMainValue =
+    typeof rawMainValue === "number"
+      ? (Number.isFinite(rawMainValue) ? rawMainValue : null)
+      : typeof rawMainValue === "string"
+        ? (() => {
+            const trimmed = rawMainValue.trim();
+            if (!trimmed) return null;
+            const parsed = Number(trimmed);
+            return Number.isFinite(parsed) ? parsed : null;
+          })()
+        : null;
+
+  if (numericMainValue === null || numericMainValue <= 0) {
+    return false;
+  }
+
+  return String(value?.sub_answer?.option ?? "").trim().length > 0;
 };
 
 const getAnswerUrl = (value) => {
@@ -619,14 +644,16 @@ const Patients = () => {
 
   const matchesSearch = useCallback(
     (p) => {
-      const searchText = search.toLowerCase();
+      const normalizeSearchableText = (value) => String(value ?? "").trim().toLowerCase();
+      const searchText = normalizeSearchableText(search);
+
       return (
-        p.patient_id.toString().includes(searchText) ||
-        p.first_name.toLowerCase().includes(searchText) ||
-        p.last_name.toLowerCase().includes(searchText) ||
-        p.email.toLowerCase().includes(searchText) ||
-        getCompanyNames(p).toLowerCase().includes(searchText) ||
-        p.created_on.toLowerCase().includes(searchText)
+        String(p?.patient_id ?? "").includes(searchText) ||
+        normalizeSearchableText(p?.first_name).includes(searchText) ||
+        normalizeSearchableText(p?.last_name).includes(searchText) ||
+        normalizeSearchableText(p?.email).includes(searchText) ||
+        normalizeSearchableText(getCompanyNames(p)).includes(searchText) ||
+        normalizeSearchableText(p?.created_on).includes(searchText)
       );
     },
     [search, getCompanyNames]
@@ -1013,11 +1040,15 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
     setPeopleLoading(true);
     try {
-      const res = await apiRequest(PATIENT_PEOPLE_API);
-      const allLinks = await res.json();
-
-      const linksForPatient = allLinks
-        .filter((pp) => getPatientIdFromPatientPerson(pp) === Number(patient.patient_id))
+      const res = await apiRequest(
+        `${PATIENT_PEOPLE_API}?patient=${encodeURIComponent(patient.patient_id)}`
+      );
+      const payload = await res.json();
+      const linksForPatient = (Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : [])
         .map((pp) => {
           const person = getPersonFromRelation(pp);
           return {
@@ -1049,12 +1080,15 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
     setEventsLoading(true);
     try {
-      const res = await apiRequest(PATIENT_EVENTS_API);
-      const allEvents = await res.json();
-
-      const eventsForPatient = allEvents.filter(
-        (item) => getPatientIdFromPatientEvent(item) === Number(patient.patient_id)
+      const res = await apiRequest(
+        `${PATIENT_EVENTS_API}?patient=${encodeURIComponent(patient.patient_id)}`
       );
+      const payload = await res.json();
+      const eventsForPatient = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : [];
 
       setPatientEvents(eventsForPatient);
     } catch (err) {
@@ -1073,9 +1107,10 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     if (!patient?.patient_id) return;
 
     try {
+      const patientQuery = `?patient=${encodeURIComponent(patient.patient_id)}`;
       const [phoneRes, addressRes] = await Promise.all([
-        apiRequest(PATIENT_PHONES_API),
-        apiRequest(PATIENT_ADDRESSES_API),
+        apiRequest(`${PATIENT_PHONES_API}${patientQuery}`),
+        apiRequest(`${PATIENT_ADDRESSES_API}${patientQuery}`),
       ]);
 
       const phonePayload = await phoneRes.json();
@@ -1093,12 +1128,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
           ? addressPayload.results
           : [];
 
-      const currentPatientId = Number(patient.patient_id ?? 0);
-
       const filteredPhones = phoneRows
-        .filter((phone) => {
-          return currentPatientId > 0 && getPhonePatientId(phone) === currentPatientId;
-        })
         .map((phone) => ({
           ...phone,
           phone: phone?.phone ?? "",
@@ -1109,9 +1139,6 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
         }));
 
       const filteredAddresses = addressRows
-        .filter((address) => {
-          return currentPatientId > 0 && getAddressPatientId(address) === currentPatientId;
-        })
         .map((address) => ({
           ...address,
           address_type: address?.address_type ?? {

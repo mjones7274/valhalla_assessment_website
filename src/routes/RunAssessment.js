@@ -9,6 +9,7 @@ const PERF_DEBUG = process.env.REACT_APP_PERF_DEBUG === "1";
 
 const DEFAULT_BRAND_LOGO_URL =
   "https://valhallaplus.org/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fvalhalla-icon.c13cd40e.png&w=64&q=75";
+const OPTION_MORE_INFO_TOOLTIP_DELAY_MS = 3000;
 const API_BASE = process.env.REACT_APP_API_URL_BASE;
 const PATIENTS_API = `${API_BASE}/api/patients/`;
 const DOCUMENT_UPLOAD_GET_LINK_API = `${API_BASE}/api/document-upload/get-link/`;
@@ -16,6 +17,7 @@ const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-atte
 const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const ASSESSMENT_CLASSIFICATIONS_API = `${API_BASE}/api/assessment-classifications/`;
+const EMAIL_SEND_WITH_ATTACHMENT_API = `${API_BASE}/api/email/send-with-attachment`;
 
 const normalizePrefillPrompt = (value) => {
   const normalized = String(value ?? "")
@@ -231,6 +233,101 @@ const getPresignedUploadErrorMessage = (error, label = "Document upload") => {
   return message || `${label} failed.`;
 };
 
+const getEmailRequestErrorMessage = async (response) => {
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      if (typeof payload === "string") {
+        return payload;
+      }
+
+      if (Array.isArray(payload)) {
+        return payload.join(" ");
+      }
+
+      if (payload && typeof payload === "object") {
+        return Object.values(payload)
+          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+          .join(" ");
+      }
+    }
+
+    return await response.text();
+  } catch {
+    return "";
+  }
+};
+
+const sendSignatureAgreementEmail = async ({
+  requestFn,
+  recipientEmail,
+  downloadUrl,
+  fileName,
+}) => {
+  const trimmedRecipientEmail = String(recipientEmail ?? "").trim();
+  const trimmedDownloadUrl = String(downloadUrl ?? "").trim();
+  const trimmedFileName = String(fileName ?? "Agreement Document.pdf").trim() || "Agreement Document.pdf";
+
+  if (!trimmedRecipientEmail || !trimmedDownloadUrl) {
+    return false;
+  }
+
+  const payload = {
+    to_addresses: [trimmedRecipientEmail],
+    subject: "Client Assessment Lein Agreement",
+    body_text: "Attached is the PDF report.",
+    attachments: [{
+      download_url: trimmedDownloadUrl,
+      file_name: trimmedFileName,
+      content_type: "application/pdf",
+    }],
+  };
+
+  const response = await requestFn(EMAIL_SEND_WITH_ATTACHMENT_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (response.ok) {
+    return true;
+  }
+
+  const lastError = await getEmailRequestErrorMessage(response);
+  throw new Error(lastError || "Signature agreement email failed.");
+};
+
+const updateAttemptAgreementStatus = async ({
+  requestFn,
+  attemptId,
+  agreementSigned,
+  agreementSent,
+}) => {
+  const resolvedAttemptId = Number(attemptId) || 0;
+  if (!resolvedAttemptId) {
+    return false;
+  }
+
+  const response = await requestFn(`${PATIENT_ASSESSMENT_ATTEMPTS_API}${resolvedAttemptId}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      agreement_sent: Boolean(agreementSent),
+      agreement_signed: Boolean(agreementSigned),
+    }),
+  });
+
+  if (response.ok) {
+    return true;
+  }
+
+  const message = await response.text().catch(() => "");
+  throw new Error(`Agreement status update failed (${response.status}) ${message}`);
+};
+
 const AgreementDocumentContent = ({
   agreementDefinition,
   displayDocumentName,
@@ -390,6 +487,20 @@ const getPersistedAnswerPayload = (
 ) => {
   if (hasSubquestion && Array.isArray(responseValue)) {
     return responseValue.map((item) => {
+      if (!shouldAllowSubquestionForAnswerValue(item?.value)) {
+        if (!Object.prototype.hasOwnProperty.call(item ?? {}, "sub_answer")) {
+          return {
+            ...item,
+          };
+        }
+
+        const nextItem = {
+          ...item,
+        };
+        delete nextItem.sub_answer;
+        return nextItem;
+      }
+
       const itemIdentity = buildSelectableItemIdentity(item);
       const selectedSubAnswer =
         (itemIdentity && subquestionSelections?.[itemIdentity]) || item?.sub_answer || null;
@@ -532,6 +643,11 @@ const toFiniteNumberOrNull = (value) => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const shouldAllowSubquestionForAnswerValue = (value) => {
+  const numericValue = toFiniteNumberOrNull(value);
+  return numericValue !== null && numericValue > 0;
 };
 
 const toApiDecimalString = (value, fractionDigits = 2) => {
@@ -695,16 +811,24 @@ const normalizeOptionItems = (options) => {
     return options
       .map((optionItem, index) => {
         if (optionItem && typeof optionItem === "object") {
-          return {
+          const normalizedOption = {
             order: Number(optionItem?.order ?? index + 1),
             option: String(optionItem?.option ?? optionItem?.label ?? ""),
+            option_more_info: String(optionItem?.option_more_info ?? ""),
             value: optionItem?.value ?? optionItem?.option ?? optionItem?.label ?? "",
           };
+
+          if (Object.prototype.hasOwnProperty.call(optionItem, "category")) {
+            normalizedOption.category = optionItem.category;
+          }
+
+          return normalizedOption;
         }
 
         return {
           order: index + 1,
           option: String(optionItem ?? ""),
+          option_more_info: "",
           value: optionItem ?? "",
         };
       })
@@ -718,17 +842,27 @@ const normalizeOptionItems = (options) => {
 
     if (hasStructuredValues) {
       return Object.values(options)
-        .map((value, index) => ({
-          order: Number(value?.order ?? index + 1),
-          option: String(value?.option ?? value?.label ?? ""),
-          value: value?.value ?? value?.option ?? value?.label ?? "",
-        }))
+        .map((value, index) => {
+          const normalizedOption = {
+            order: Number(value?.order ?? index + 1),
+            option: String(value?.option ?? value?.label ?? ""),
+            option_more_info: String(value?.option_more_info ?? ""),
+            value: value?.value ?? value?.option ?? value?.label ?? "",
+          };
+
+          if (Object.prototype.hasOwnProperty.call(value ?? {}, "category")) {
+            normalizedOption.category = value.category;
+          }
+
+          return normalizedOption;
+        })
         .filter((optionItem) => optionItem.option);
     }
 
     return Object.entries(options).map(([option, value], index) => ({
       order: index + 1,
       option,
+      option_more_info: "",
       value,
     }));
   }
@@ -1114,6 +1248,7 @@ const AgreementSignatureField = ({
   assessmentAttemptId,
   uploadRequestFn,
   onRegisterPdfExporter,
+  emailRecipient,
   isRequired = false,
   questionTextClassName = "run-assessment-question-text",
 }) => {
@@ -1263,6 +1398,7 @@ const AgreementSignatureField = ({
 
         const documentLinkPayload = await documentLinkRes.json().catch(() => null);
         const documentUrl = String(documentLinkPayload?.document_url ?? "").trim();
+        const downloadUrl = String(documentLinkPayload?.download_url ?? "").trim();
         const patientDocumentId = Number(documentLinkPayload?.patient_document_id) || null;
 
         if (!documentUrl || !patientDocumentId) {
@@ -1301,7 +1437,24 @@ const AgreementSignatureField = ({
           patient_document_id: patientDocumentId,
         }));
 
-        return patientDocumentId;
+        let agreementSent = false;
+
+        try {
+          await sendSignatureAgreementEmail({
+            requestFn: uploadRequestFn,
+            recipientEmail: emailRecipient,
+            downloadUrl: downloadUrl || documentUrl,
+            fileName: documentNameForUpload,
+          });
+          agreementSent = true;
+        } catch (error) {
+          console.error("Failed to send signature agreement email", error);
+        }
+
+        return {
+          patientDocumentId,
+          agreementSent,
+        };
       } catch (error) {
         throw error;
       } finally {
@@ -1323,6 +1476,7 @@ const AgreementSignatureField = ({
     questionText,
     resolvedDocumentTypeId,
     companyId,
+    emailRecipient,
     signatureDataUrl,
     assessmentAttemptId,
     uploadRequestFn,
@@ -1748,6 +1902,7 @@ export default function RunAssessment({
   attemptIdOverride = null,
   prefillData = null,
   showMetadataToggle = true,
+  signatureAgreementEmailRecipient = null,
   requestFn = apiRequest,
 }) {
   const questions = useMemo(() => getFlatQuestions(sections), [sections]);
@@ -1777,11 +1932,21 @@ export default function RunAssessment({
   const [isResolvingRequestedStart, setIsResolvingRequestedStart] = useState(false);
   const [subquestionSelectionsByQuestionId, setSubquestionSelectionsByQuestionId] = useState({});
   const [activeSubquestionPopup, setActiveSubquestionPopup] = useState(null);
+  const [activeOptionMoreInfoCard, setActiveOptionMoreInfoCard] = useState(null);
   const currentSignaturePdfExporterRef = useRef(null);
   const responsesRef = useRef({});
   const subquestionSelectionsByQuestionIdRef = useRef({});
   const responseIdByQuestionIdRef = useRef({});
   const appliedStartRequestRef = useRef(null);
+  const optionMoreInfoTimerRef = useRef(null);
+
+  const clearOptionMoreInfoTimer = () => {
+    if (optionMoreInfoTimerRef.current !== null) {
+      window.clearTimeout(optionMoreInfoTimerRef.current);
+      optionMoreInfoTimerRef.current = null;
+    }
+  };
+
   const numericPatientId = Number(patientId);
   const numericCompanyId = Number(
     selectedCompany?.company_id ?? selectedCompany?.id ?? selectedCompany?.company?.company_id ?? 0
@@ -1829,6 +1994,12 @@ export default function RunAssessment({
       cancelled = true;
     };
   }, [isOpen, numericPatientId, patient]);
+
+  useEffect(() => {
+    return () => {
+      clearOptionMoreInfoTimer();
+    };
+  }, []);
 
   const getQuestionIdForItem = (item) =>
     Number(item?.question?.question_id ?? item?.questionSection?.question_id ?? 0) || 0;
@@ -2096,6 +2267,14 @@ export default function RunAssessment({
     () => buildPatientTemplateData(resolvedPatient, prefillContext),
     [prefillContext, resolvedPatient]
   );
+  const resolvedSignatureAgreementEmailRecipient = useMemo(() => {
+    const overrideEmail = String(signatureAgreementEmailRecipient ?? "").trim();
+    if (overrideEmail) {
+      return overrideEmail;
+    }
+
+    return String(resolvedPatient?.email ?? patient?.email ?? "").trim();
+  }, [patient?.email, resolvedPatient?.email, signatureAgreementEmailRecipient]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -2726,15 +2905,198 @@ export default function RunAssessment({
 
   useEffect(() => {
     setActiveSubquestionPopup(null);
+    setActiveOptionMoreInfoCard(null);
+    clearOptionMoreInfoTimer();
   }, [questionId]);
+
+  const getOptionMoreInfoText = (optionItem) => String(optionItem?.option_more_info ?? "").trim();
+
+  const getOptionMoreInfoIdentity = (optionItem) => buildSelectableItemIdentity(optionItem);
+
+  const getOptionMoreInfoAnchorPosition = (anchorRect) => {
+    const fallbackWidth = 420;
+    const cardWidth = Math.min(fallbackWidth, Math.max(240, window.innerWidth - 32));
+    const gap = 10;
+    const viewportPadding = 12;
+    const rawLeft = (anchorRect?.right ?? 0) - cardWidth;
+    const rawTop = (anchorRect?.bottom ?? 0) + gap;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - cardWidth - viewportPadding);
+    const left = Math.min(Math.max(viewportPadding, rawLeft), maxLeft);
+    const maxTop = Math.max(viewportPadding, window.innerHeight - 220);
+    const top = Math.min(Math.max(viewportPadding, rawTop), maxTop);
+
+    return {
+      left,
+      top,
+      width: cardWidth,
+    };
+  };
+
+  const openOptionMoreInfoCard = (optionItem, trigger = "hover", anchorRect = null) => {
+    const optionIdentity = getOptionMoreInfoIdentity(optionItem);
+    const infoText = getOptionMoreInfoText(optionItem);
+
+    if (!optionIdentity || !infoText) return;
+
+    const anchorPosition = getOptionMoreInfoAnchorPosition(anchorRect);
+
+    setActiveOptionMoreInfoCard({
+      questionId,
+      optionIdentity,
+      optionLabel: String(optionItem?.option ?? "").trim(),
+      infoText,
+      trigger,
+      anchorPosition,
+    });
+  };
+
+  const scheduleOptionMoreInfoCard = (optionItem, anchorRect = null) => {
+    const optionIdentity = getOptionMoreInfoIdentity(optionItem);
+    const infoText = getOptionMoreInfoText(optionItem);
+
+    if (!optionIdentity || !infoText) return;
+
+    clearOptionMoreInfoTimer();
+    optionMoreInfoTimerRef.current = window.setTimeout(() => {
+      setActiveOptionMoreInfoCard((prev) => {
+        if (
+          prev?.questionId === questionId &&
+          prev?.optionIdentity === optionIdentity &&
+          prev?.trigger === "click"
+        ) {
+          return prev;
+        }
+
+        return {
+          questionId,
+          optionIdentity,
+          optionLabel: String(optionItem?.option ?? "").trim(),
+          infoText,
+          trigger: "hover",
+          anchorPosition: getOptionMoreInfoAnchorPosition(anchorRect),
+        };
+      });
+      optionMoreInfoTimerRef.current = null;
+    }, OPTION_MORE_INFO_TOOLTIP_DELAY_MS);
+  };
+
+  const hideHoveredOptionMoreInfoCard = (optionItem) => {
+    const optionIdentity = getOptionMoreInfoIdentity(optionItem);
+    clearOptionMoreInfoTimer();
+
+    if (!optionIdentity) return;
+
+    setActiveOptionMoreInfoCard((prev) => {
+      if (
+        prev?.questionId === questionId &&
+        prev?.optionIdentity === optionIdentity &&
+        prev?.trigger === "hover"
+      ) {
+        return null;
+      }
+
+      return prev;
+    });
+  };
+
+  const renderSelectableOptionRow = ({
+    optionItem,
+    inputType,
+    inputName,
+    checked,
+    value,
+    onChange,
+    trailingContent = null,
+  }) => {
+    const optionIdentity = getOptionMoreInfoIdentity(optionItem);
+    const optionMoreInfoText = getOptionMoreInfoText(optionItem);
+    const hasOptionMoreInfo = Boolean(optionIdentity) && Boolean(optionMoreInfoText);
+
+    return (
+      <label
+        className={`run-assessment-radio-row ${hasOptionMoreInfo ? "run-assessment-radio-row-has-info" : ""}`}
+        key={`${optionItem.order}-${optionItem.option}`}
+        onMouseEnter={(event) => {
+          if (hasOptionMoreInfo) {
+            const buttonRect = event.currentTarget
+              .querySelector(".run-assessment-option-more-info-button")
+              ?.getBoundingClientRect?.();
+            scheduleOptionMoreInfoCard(optionItem, buttonRect ?? event.currentTarget.getBoundingClientRect());
+          }
+        }}
+        onMouseLeave={() => {
+          if (hasOptionMoreInfo) {
+            hideHoveredOptionMoreInfoCard(optionItem);
+          }
+        }}
+      >
+        {hasOptionMoreInfo && (
+          <button
+            type="button"
+            className="run-assessment-option-more-info-button"
+            aria-label={`More info for ${optionItem.option}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              clearOptionMoreInfoTimer();
+              const anchorRect = event.currentTarget.getBoundingClientRect();
+              const isSameClickCardOpen =
+                activeOptionMoreInfoCard?.questionId === questionId &&
+                activeOptionMoreInfoCard?.optionIdentity === optionIdentity &&
+                activeOptionMoreInfoCard?.trigger === "click";
+
+              if (isSameClickCardOpen) {
+                setActiveOptionMoreInfoCard(null);
+                return;
+              }
+
+              openOptionMoreInfoCard(optionItem, "click", anchorRect);
+            }}
+          >
+            <span aria-hidden="true">i</span>
+          </button>
+        )}
+
+        <span className="run-assessment-radio-row-main">
+          <input
+            type={inputType}
+            name={inputName}
+            value={value}
+            checked={checked}
+            onChange={onChange}
+          />
+          <span className="run-assessment-option-label-wrap">
+            <span>{optionItem.option}</span>
+            {trailingContent}
+          </span>
+        </span>
+      </label>
+    );
+  };
 
   const currentQuestionSubquestionSelections =
     subquestionSelectionsByQuestionId[questionId] ??
     getSubquestionSelectionsFromResponseValue(currentResponse);
+  const filteredCurrentQuestionSubquestionSelections = Object.entries(
+    currentQuestionSubquestionSelections ?? {}
+  ).reduce((accumulator, [parentOptionId, selection]) => {
+    const matchingSelectedItem = Array.isArray(currentResponse)
+      ? currentResponse.find((item) => buildSelectableItemIdentity(item) === parentOptionId)
+      : null;
+
+    if (!matchingSelectedItem || !shouldAllowSubquestionForAnswerValue(matchingSelectedItem?.value)) {
+      return accumulator;
+    }
+
+    return {
+      ...accumulator,
+      [parentOptionId]: selection,
+    };
+  }, {});
 
   const activeSubquestionSelection =
     activeSubquestionPopup && activeSubquestionPopup.questionId === questionId
-      ? currentQuestionSubquestionSelections[activeSubquestionPopup.parentOptionId] ?? null
+      ? filteredCurrentQuestionSubquestionSelections[activeSubquestionPopup.parentOptionId] ?? null
       : null;
 
   const persistResponseAndAttemptState = async ({
@@ -2750,9 +3112,25 @@ export default function RunAssessment({
     const currentSubquestionSelectionsSnapshot =
       subquestionSelectionsByQuestionIdRef.current[questionId] ??
       getSubquestionSelectionsFromResponseValue(currentResponseSnapshot);
+    const filteredSubquestionSelectionsSnapshot = Object.entries(
+      currentSubquestionSelectionsSnapshot ?? {}
+    ).reduce((accumulator, [parentOptionId, selection]) => {
+      const matchingSelectedItem = Array.isArray(currentResponseSnapshot)
+        ? currentResponseSnapshot.find((item) => buildSelectableItemIdentity(item) === parentOptionId)
+        : null;
+
+      if (!matchingSelectedItem || !shouldAllowSubquestionForAnswerValue(matchingSelectedItem?.value)) {
+        return accumulator;
+      }
+
+      return {
+        ...accumulator,
+        [parentOptionId]: selection,
+      };
+    }, {});
     const answerPayload = getPersistedAnswerPayload(question, currentResponseSnapshot, {
       hasSubquestion: currentQuestionHasSubquestion,
-      subquestionSelections: currentSubquestionSelectionsSnapshot,
+      subquestionSelections: filteredSubquestionSelectionsSnapshot,
     });
     const shouldIncludeScoreValue = toBooleanRequired(
       currentItem?.questionSection?.include_sum_total ??
@@ -3184,14 +3562,77 @@ export default function RunAssessment({
 
     setResponsesWithRef((prev) => {
       const resolvedValue = typeof value === "function" ? value(prev[questionId]) : value;
+      const sanitizedResolvedValue =
+        currentQuestionHasSubquestion && Array.isArray(resolvedValue)
+          ? resolvedValue.map((item) => {
+              if (shouldAllowSubquestionForAnswerValue(item?.value)) {
+                return item;
+              }
+
+              if (!Object.prototype.hasOwnProperty.call(item ?? {}, "sub_answer")) {
+                return item;
+              }
+
+              const nextItem = {
+                ...item,
+              };
+              delete nextItem.sub_answer;
+              return nextItem;
+            })
+          : resolvedValue;
       const next = {
         ...prev,
-        [questionId]: resolvedValue,
+        [questionId]: sanitizedResolvedValue,
       };
+
+      if (currentQuestionHasSubquestion && Array.isArray(sanitizedResolvedValue)) {
+        const allowedParentOptionIds = new Set(
+          sanitizedResolvedValue
+            .filter((item) => shouldAllowSubquestionForAnswerValue(item?.value))
+            .map((item) => buildSelectableItemIdentity(item))
+            .filter(Boolean)
+        );
+
+        setSubquestionSelectionsWithRef((previousSelections) => {
+          const currentSelections = previousSelections[questionId] ?? {};
+          const nextSelections = Object.entries(currentSelections).reduce(
+            (accumulator, [parentOptionId, selection]) => {
+              if (!allowedParentOptionIds.has(parentOptionId)) {
+                return accumulator;
+              }
+
+              return {
+                ...accumulator,
+                [parentOptionId]: selection,
+              };
+            },
+            {}
+          );
+
+          if (Object.keys(nextSelections).length === Object.keys(currentSelections).length) {
+            return previousSelections;
+          }
+
+          const nextAllSelections = { ...previousSelections };
+          if (Object.keys(nextSelections).length) {
+            nextAllSelections[questionId] = nextSelections;
+          } else {
+            delete nextAllSelections[questionId];
+          }
+          return nextAllSelections;
+        });
+
+        if (
+          activeSubquestionPopup?.questionId === questionId &&
+          !allowedParentOptionIds.has(activeSubquestionPopup.parentOptionId)
+        ) {
+          setActiveSubquestionPopup(null);
+        }
+      }
 
       if (!sourceRule) return next;
 
-      const matchedAfter = doesRuleMatchResponseValue(sourceRule, resolvedValue);
+      const matchedAfter = doesRuleMatchResponseValue(sourceRule, sanitizedResolvedValue);
 
       if (!matchedAfter) {
         const targetSectionId = getTargetSectionIdFromRule(sourceRule);
@@ -3733,9 +4174,13 @@ export default function RunAssessment({
     if (nextIndex === currentIndex) return;
 
     const perform = async () => {
+      let agreementSigned = false;
+      let agreementSent = false;
+
       if (isSignatureAgreementQuestion && currentSignaturePdfExporterRef.current) {
         try {
-          await currentSignaturePdfExporterRef.current();
+          const signatureExportResult = await currentSignaturePdfExporterRef.current();
+          agreementSent = signatureExportResult?.agreementSent === true;
         } catch (error) {
           setSignatureUploadError(
             getPresignedUploadErrorMessage(error, "Signature agreement upload")
@@ -3759,8 +4204,24 @@ export default function RunAssessment({
             targetIndex: nextIndex,
             status: "in_progress",
           });
+          if (isSignatureAgreementQuestion) {
+            agreementSigned = true;
+          }
         } catch (error) {
           console.error("Failed to persist next navigation", error);
+        }
+
+        if (isSignatureAgreementQuestion) {
+          try {
+            await updateAttemptAgreementStatus({
+              requestFn,
+              attemptId,
+              agreementSigned,
+              agreementSent,
+            });
+          } catch (error) {
+            console.error("Failed to update signature agreement status", error);
+          }
         }
       }
     };
@@ -3971,6 +4432,7 @@ export default function RunAssessment({
             companyId={numericCompanyId || 1000}
             assessmentAttemptId={attemptId || numericAttemptIdOverride || 46}
             uploadRequestFn={requestFn}
+            emailRecipient={resolvedSignatureAgreementEmailRecipient}
             onRegisterPdfExporter={(exporter) => {
               currentSignaturePdfExporterRef.current = exporter;
             }}
@@ -4186,6 +4648,7 @@ export default function RunAssessment({
             const optionOrder = Number(optionItem.order);
             const parentOptionId = buildSelectableItemIdentity(optionItem);
             const exists = selectedItems.some((item) => matchesSelectableOption(item, optionItem));
+            const shouldShowSubquestion = shouldAllowSubquestionForAnswerValue(optionItem?.value);
 
             if (exists) {
               setSubquestionSelectionsWithRef((prev) => {
@@ -4233,11 +4696,18 @@ export default function RunAssessment({
                   order: optionOrder,
                   option: optionItem.option,
                   value: optionItem.value,
+                  ...(Object.prototype.hasOwnProperty.call(optionItem ?? {}, "category")
+                    ? { category: optionItem.category }
+                    : {}),
                 },
               ];
             });
 
-            if (currentQuestionHasSubquestion && currentSubQuestionOptions.length > 0) {
+            if (
+              currentQuestionHasSubquestion &&
+              shouldShowSubquestion &&
+              currentSubQuestionOptions.length > 0
+            ) {
               setActiveSubquestionPopup({
                 questionId,
                 parentOptionId,
@@ -4252,27 +4722,29 @@ export default function RunAssessment({
                 const optionIdentity = buildSelectableItemIdentity(optionItem);
                 const checked = selectedItems.some((item) => matchesSelectableOption(item, optionItem));
                 const selectedSubquestionResponse =
-                  currentQuestionSubquestionSelections[optionIdentity] ??
-                  selectedItems.find((item) => matchesSelectableOption(item, optionItem))?.sub_answer ??
+                  filteredCurrentQuestionSubquestionSelections[optionIdentity] ??
+                  selectedItems.find(
+                    (item) =>
+                      matchesSelectableOption(item, optionItem) &&
+                      shouldAllowSubquestionForAnswerValue(item?.value)
+                  )?.sub_answer ??
                   null;
 
                 return (
-                  <label className="run-assessment-radio-row" key={`${optionItem.order}-${optionItem.option}`}>
-                    <input
-                      type="checkbox"
-                      name={`question-${questionId}-multi`}
-                      checked={checked}
-                      onChange={() => toggleOption(optionItem)}
-                    />
-                    <span className="run-assessment-option-label-wrap">
-                      <span>{optionItem.option}</span>
-                      {checked && selectedSubquestionResponse?.option && (
+                  renderSelectableOptionRow({
+                    optionItem,
+                    inputType: "checkbox",
+                    inputName: `question-${questionId}-multi`,
+                    checked,
+                    value: optionIdentity,
+                    onChange: () => toggleOption(optionItem),
+                    trailingContent:
+                      checked && selectedSubquestionResponse?.option ? (
                         <span className="run-assessment-option-subquestion-answer">
                           {selectedSubquestionResponse.option}
                         </span>
-                      )}
-                    </span>
-                  </label>
+                      ) : null,
+                  })
                 );
               })}
             </div>
@@ -4298,24 +4770,19 @@ export default function RunAssessment({
                 const optionOrder = Number(optionItem.order);
                 const checked = Number.isFinite(selectedOrder) && selectedOrder === optionOrder;
 
-                return (
-                  <label className="run-assessment-radio-row" key={`${optionItem.order}-${optionItem.option}`}>
-                    <input
-                      type="radio"
-                      name={`question-${questionId}`}
-                      value={optionOrder}
-                      checked={checked}
-                      onChange={() =>
-                        setResponse({
-                          order: optionOrder,
-                          option: optionItem.option,
-                          value: optionItem.value,
-                        })
-                      }
-                    />
-                    <span>{optionItem.option}</span>
-                  </label>
-                );
+                return renderSelectableOptionRow({
+                  optionItem,
+                  inputType: "radio",
+                  inputName: `question-${questionId}`,
+                  checked,
+                  value: optionOrder,
+                  onChange: () =>
+                    setResponse({
+                      order: optionOrder,
+                      option: optionItem.option,
+                      value: optionItem.value,
+                    }),
+                });
               })}
             </div>
           );
@@ -4338,24 +4805,19 @@ export default function RunAssessment({
               {selectOptions.map((optionItem) => {
                 const optionOrder = Number(optionItem.order);
                 const checked = Number.isFinite(selectedOrder) && selectedOrder === optionOrder;
-                return (
-                  <label className="run-assessment-radio-row" key={`${optionItem.order}-${optionItem.option}`}>
-                    <input
-                      type="radio"
-                      name={`question-${questionId}`}
-                      value={optionOrder}
-                      checked={checked}
-                      onChange={() =>
-                        setResponse({
-                          order: optionOrder,
-                          option: optionItem.option,
-                          value: optionItem.value,
-                        })
-                      }
-                    />
-                    <span>{optionItem.option}</span>
-                  </label>
-                );
+                return renderSelectableOptionRow({
+                  optionItem,
+                  inputType: "radio",
+                  inputName: `question-${questionId}`,
+                  checked,
+                  value: optionOrder,
+                  onChange: () =>
+                    setResponse({
+                      order: optionOrder,
+                      option: optionItem.option,
+                      value: optionItem.value,
+                    }),
+                });
               })}
             </div>
           );
@@ -4479,6 +4941,12 @@ export default function RunAssessment({
             {activeSubquestionPopup &&
               activeSubquestionPopup.questionId === questionId &&
               currentQuestionHasSubquestion &&
+              Array.isArray(currentResponse) &&
+              currentResponse.some(
+                (item) =>
+                  buildSelectableItemIdentity(item) === activeSubquestionPopup.parentOptionId &&
+                  shouldAllowSubquestionForAnswerValue(item?.value)
+              ) &&
               currentSubQuestionOptions.length > 0 && (
                 <div className="run-assessment-subquestion-overlay" role="presentation">
                   <div
@@ -4557,6 +5025,61 @@ export default function RunAssessment({
             {signatureUploadError ? (
               <div className="run-assessment-inline-error" role="alert">
                 {signatureUploadError}
+              </div>
+            ) : null}
+
+            {activeOptionMoreInfoCard?.questionId === questionId ? (
+              <div
+                className={`run-assessment-option-more-info-overlay ${
+                  activeOptionMoreInfoCard?.trigger === "hover"
+                    ? "run-assessment-option-more-info-overlay-hover"
+                    : "run-assessment-option-more-info-overlay-click"
+                }`}
+                role="presentation"
+                onClick={() => {
+                  if (activeOptionMoreInfoCard?.trigger === "click") {
+                    setActiveOptionMoreInfoCard(null);
+                  }
+                }}
+              >
+                <div
+                  className={`run-assessment-option-more-info-card ${
+                    activeOptionMoreInfoCard?.trigger === "hover"
+                      ? "run-assessment-option-more-info-card-hover"
+                      : "run-assessment-option-more-info-card-click"
+                  }`}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={`${activeOptionMoreInfoCard?.optionLabel || "Option"} more info`}
+                  style={{
+                    left: `${activeOptionMoreInfoCard?.anchorPosition?.left ?? 12}px`,
+                    top: `${activeOptionMoreInfoCard?.anchorPosition?.top ?? 12}px`,
+                    width: `${activeOptionMoreInfoCard?.anchorPosition?.width ?? 320}px`,
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  <div className="run-assessment-option-more-info-card-header">
+                    <div className="run-assessment-option-more-info-card-title-wrap">
+                      <div className="run-assessment-option-more-info-card-title">
+                        {activeOptionMoreInfoCard?.optionLabel || "Option"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="run-assessment-option-more-info-card-close"
+                      aria-label="Close more info"
+                      onClick={() => setActiveOptionMoreInfoCard(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="run-assessment-option-more-info-card-body">
+                    {activeOptionMoreInfoCard?.infoText}
+                  </div>
+                </div>
               </div>
             ) : null}
 

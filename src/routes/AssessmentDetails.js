@@ -39,6 +39,30 @@ const serializeQuestionChoicesJson = (choices) => {
   return JSON.stringify(choices ?? [], null, 2);
 };
 
+const normalizeQuestionChoice = (choice = {}, fallbackOrder = 0) => ({
+  ...choice,
+  option: String(choice?.option ?? ""),
+  option_more_info: String(choice?.option_more_info ?? ""),
+  category: (() => {
+    const normalizedCategory = String(choice?.category ?? "").trim();
+
+    if (!normalizedCategory) {
+      return "";
+    }
+
+    const parsedCategoryId = Number(normalizedCategory);
+    return Number.isFinite(parsedCategoryId) ? parsedCategoryId : "";
+  })(),
+  report_verbiage: String(choice?.report_verbiage ?? ""),
+  value: Number(choice?.value ?? 0),
+  order: Number(choice?.order ?? fallbackOrder),
+});
+
+const normalizeQuestionChoicesForSave = (choices) =>
+  (Array.isArray(choices) ? choices : []).map((choice, index) =>
+    normalizeQuestionChoice(choice, index + 1)
+  );
+
 const renderHighlightedDescriptionText = (text, labels) => {
   const normalizedText = String(text ?? "");
   const filteredLabels = Array.from(
@@ -749,18 +773,12 @@ function AssessmentDetails() {
         choices: isSignatureAgreement
           ? questionData.choices ?? []
           : questionData.use_default_options
-            ? (questionData.question_type.options || []).map((opt) => ({
-                option: opt.option,
-                report_verbiage: opt.report_verbiage ?? "",
-                value: opt.value,
-                order: opt.order,
-              }))
-            : (questionData.choices || []).map((c) => ({
-                option: c.option,
-                report_verbiage: c.report_verbiage ?? "",
-                value: c.value,
-                order: c.order,
-              })),
+            ? (questionData.question_type.options || []).map((opt, index) =>
+                normalizeQuestionChoice(opt, index + 1)
+              )
+            : (questionData.choices || []).map((choice, index) =>
+                normalizeQuestionChoice(choice, index + 1)
+              ),
         choices_json: isSignatureAgreement
           ? serializeQuestionChoicesJson(questionData.choices)
           : "",
@@ -3880,7 +3898,7 @@ const compareQuestionOrder = (left, right) => {
                     ? []
                     : isSignatureAgreement
                       ? serializedSignatureAgreementChoices
-                      : editingQuestion.choices,
+                      : normalizeQuestionChoicesForSave(editingQuestion.choices),
                   ...(isPerformTaskVideo || isSignatureAgreement
                     ? { hyperlink: String(editingQuestion.hyperlink ?? "").trim() }
                     : {}),
@@ -4734,6 +4752,7 @@ const compareQuestionOrder = (left, right) => {
           assessmentName={assessmentDetails?.name}
           assessmentId={Number(assessmentDetails?.assessment_id ?? id ?? 0) || null}
           shouldPersistAssessmentResponses={false}
+          signatureAgreementEmailRecipient="mike@valhallahealth.org"
           patientId={Number.isFinite(runPatientId) && runPatientId > 0 ? runPatientId : null}
           patientEventId={
             Number.isFinite(runPatientEventId) && runPatientEventId > 0

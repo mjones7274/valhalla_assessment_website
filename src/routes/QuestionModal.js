@@ -1,13 +1,16 @@
 // src/routes/QuestionModal.js
 import React from "react";
+import { apiRequest } from "../api";
 
 const inputStyle = {
   width: "100%",
+  minWidth: 0,
   padding: "10px 12px",
   background: "#f5f6f8",
   border: "none",
   borderRadius: "6px",
   fontSize: "0.95rem",
+  boxSizing: "border-box",
 };
 
 const numberInputStyle = {
@@ -20,6 +23,10 @@ const labelStyle = {
   fontWeight: 600,
 };
 
+const responseOptionHeaderTextStyle = {
+  padding: "0 12px",
+};
+
 const normalizeQuestionTypeDescription = (value) =>
   String(value ?? "")
     .trim()
@@ -29,6 +36,47 @@ const normalizeQuestionTypeDescription = (value) =>
 const isSignatureAgreementQuestionType = (questionTypeId, description) =>
   Number(questionTypeId) === 33 ||
   normalizeQuestionTypeDescription(description) === "signature_agreement";
+
+const isMultipleSelectQuestionType = (questionTypeId, description) =>
+  Number(questionTypeId) === 28 ||
+  normalizeQuestionTypeDescription(description) === "multiple_select";
+
+const normalizeChoiceCategoryValue = (value) => String(value ?? "").trim();
+
+const resolveSymptomCategoryId = (value, symptomCategories) => {
+  const normalizedValue = normalizeChoiceCategoryValue(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const exactIdMatch = symptomCategories.find(
+    (categoryOption) =>
+      String(categoryOption?.symptom_category_id ?? "") === normalizedValue
+  );
+
+  if (exactIdMatch) {
+    return String(exactIdMatch.symptom_category_id);
+  }
+
+  const normalizedLabel = normalizedValue.toLowerCase();
+  const labelMatch = symptomCategories.find(
+    (categoryOption) =>
+      String(categoryOption?.category ?? "").trim().toLowerCase() === normalizedLabel
+  );
+
+  return labelMatch ? String(labelMatch.symptom_category_id) : "";
+};
+
+const normalizeChoiceForEditing = (choice = {}, fallbackOrder = 0) => ({
+  ...choice,
+  option: String(choice?.option ?? ""),
+  option_more_info: String(choice?.option_more_info ?? ""),
+  category: normalizeChoiceCategoryValue(choice?.category),
+  report_verbiage: String(choice?.report_verbiage ?? ""),
+  value: Number(choice?.value ?? 0),
+  order: Number(choice?.order ?? fallbackOrder),
+});
 
 
 export default function QuestionModal({
@@ -45,7 +93,77 @@ export default function QuestionModal({
 }) {
   const optionInputRefs = React.useRef({});
   const nextOptionFocusIndexRef = React.useRef(null);
+  const [symptomCategories, setSymptomCategories] = React.useState([]);
   const choicesLength = editingQuestion?.choices?.length ?? 0;
+
+  const isMultipleSelect = isMultipleSelectQuestionType(
+    editingQuestion?.question_type_id,
+    selectedQuestionType?.description
+  );
+
+  React.useEffect(() => {
+    if (!isOpen || !isMultipleSelect) return;
+
+    let isCancelled = false;
+
+    const loadSymptomCategories = async () => {
+      try {
+        const res = await apiRequest("/api/symptom-categories");
+        const data = res.ok ? await res.json() : [];
+
+        if (!isCancelled) {
+          setSymptomCategories(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (!isCancelled) {
+          setSymptomCategories([]);
+        }
+      }
+    };
+
+    loadSymptomCategories();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, isMultipleSelect]);
+
+  React.useEffect(() => {
+    if (!isOpen || !isMultipleSelect || !editingQuestion || !symptomCategories.length) {
+      return;
+    }
+
+    const choices = Array.isArray(editingQuestion.choices) ? editingQuestion.choices : [];
+    let hasChanges = false;
+
+    const nextChoices = choices.map((choice) => {
+      const currentCategory = normalizeChoiceCategoryValue(choice?.category);
+      const nextCategory = resolveSymptomCategoryId(currentCategory, symptomCategories);
+
+      if (currentCategory === nextCategory) {
+        return choice;
+      }
+
+      hasChanges = true;
+      return {
+        ...choice,
+        category: nextCategory,
+      };
+    });
+
+    if (hasChanges) {
+      setEditingQuestion({
+        ...editingQuestion,
+        choices: nextChoices,
+      });
+    }
+  }, [
+    editingQuestion,
+    isMultipleSelect,
+    isOpen,
+    setEditingQuestion,
+    symptomCategories,
+  ]);
 
   React.useEffect(() => {
     if (!isOpen || !editingQuestion) return;
@@ -74,7 +192,7 @@ export default function QuestionModal({
     selectedQuestionType?.description
   );
   const normalizedChoices = Array.isArray(editingQuestion.choices)
-    ? editingQuestion.choices
+    ? editingQuestion.choices.map((choice, index) => normalizeChoiceForEditing(choice, index + 1))
     : [];
   const signatureAgreementChoicesJson =
     typeof editingQuestion.choices_json === "string"
@@ -84,6 +202,14 @@ export default function QuestionModal({
   const sortedChoices = [...normalizedChoices].sort(
         (a, b) => a.order - b.order
     );
+  const longestOptionLength = sortedChoices.reduce(
+    (maxLength, choice) => Math.max(maxLength, String(choice?.option ?? "").length),
+    "Option".length
+  );
+  const optionColumnWidth = `${Math.max(Math.round((longestOptionLength + 2) * 0.85), 10)}ch`;
+  const responseOptionGridTemplateColumns = isMultipleSelect
+    ? `${optionColumnWidth} minmax(253px, 1.15fr) minmax(220px, 1fr) 90px 90px 40px`
+    : "3fr 1fr 90px 90px 40px";
 
   const conditionalResponseOptions = sortedChoices
     .map((choice, idx) => {
@@ -349,19 +475,20 @@ export default function QuestionModal({
 
                 const options = qt?.options;
                 const nextChoices = Array.isArray(options)
-                  ? options.map((opt, idx) => ({
-                      option: opt?.option ?? "",
-                      report_verbiage: opt?.report_verbiage ?? "",
-                      value: Number(opt?.value ?? 0),
-                      order: Number(opt?.order ?? idx + 1),
-                    }))
+                  ? options.map((opt, idx) => normalizeChoiceForEditing(opt, idx + 1))
                   : options && typeof options === "object"
-                    ? Object.entries(options).map(([option, value], idx) => ({
-                        option,
-                        report_verbiage: "",
-                        value: Number(value ?? 0),
-                        order: idx + 1,
-                      }))
+                    ? Object.entries(options).map(([option, value], idx) =>
+                        normalizeChoiceForEditing(
+                          {
+                            option,
+                            option_more_info: "",
+                            report_verbiage: "",
+                            value,
+                            order: idx + 1,
+                          },
+                          idx + 1
+                        )
+                      )
                     : [];
 
                 setEditingQuestion({
@@ -471,33 +598,76 @@ export default function QuestionModal({
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "3fr 1fr 90px 90px 40px",
-                    fontSize: "0.8rem",
-                    color: "#666",
-                    padding: "6px 0",
+                    gridTemplateColumns: responseOptionGridTemplateColumns,
+                    columnGap: "8px",
+                    rowGap: "8px",
+                    alignItems: "center",
                   }}
                 >
-                  <div>Option</div>
-                  <div>Report Verbiage</div>
-                  <div style={{ textAlign: "center" }}>Value</div>
-                  <div style={{ textAlign: "center" }}>Order</div>
+                  <div
+                    style={{
+                      ...responseOptionHeaderTextStyle,
+                      fontSize: "0.8rem",
+                      color: "#666",
+                      paddingTop: "6px",
+                      paddingBottom: "6px",
+                    }}
+                  >
+                    Option
+                  </div>
+                  <div
+                    style={{
+                      ...responseOptionHeaderTextStyle,
+                      fontSize: "0.8rem",
+                      color: "#666",
+                      paddingTop: "6px",
+                      paddingBottom: "6px",
+                    }}
+                  >
+                    Option More Info
+                  </div>
+                  {isMultipleSelect && (
+                    <div
+                      style={{
+                        ...responseOptionHeaderTextStyle,
+                        fontSize: "0.8rem",
+                        color: "#666",
+                        paddingTop: "6px",
+                        paddingBottom: "6px",
+                      }}
+                    >
+                      Category
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "#666",
+                      textAlign: "center",
+                      paddingTop: "6px",
+                      paddingBottom: "6px",
+                    }}
+                  >
+                    Value
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "#666",
+                      textAlign: "center",
+                      paddingTop: "6px",
+                      paddingBottom: "6px",
+                    }}
+                  >
+                    Order
+                  </div>
                   <div />
-                </div>
 
-                {sortedChoices.map((r, idx) => {
-                  const originalIndex = normalizedChoices.indexOf(r);
+                  {sortedChoices.map((r, idx) => {
+                    const originalIndex = normalizedChoices.indexOf(r);
 
                     return (
-                        <div
-                        key={`choice-${originalIndex}-${idx}`}
-                        style={{
-                            display: "grid",
-                          gridTemplateColumns: "3fr 1fr 90px 90px 40px",
-                            gap: "8px",
-                            marginBottom: "8px",
-                        }}
-                        >
-
+                      <React.Fragment key={`choice-${originalIndex}-${idx}`}>
                         <input
                           ref={(el) => {
                           if (el) {
@@ -521,16 +691,48 @@ export default function QuestionModal({
 
                         <input
                           style={inputStyle}
-                          value={r.report_verbiage ?? ""}
+                          value={r.option_more_info ?? ""}
                           onChange={(e) => {
                           const next = [...normalizedChoices];
                           next[originalIndex] = {
                             ...next[originalIndex],
-                            report_verbiage: e.target.value,
+                            option_more_info: e.target.value,
                           };
                           setEditingQuestion({ ...editingQuestion, choices: next });
                           }}
                         />
+
+                        {isMultipleSelect && (
+                          <select
+                            style={inputStyle}
+                            value={resolveSymptomCategoryId(r.category, symptomCategories)}
+                            onChange={(e) => {
+                              const next = [...normalizedChoices];
+                              next[originalIndex] = {
+                                ...next[originalIndex],
+                                category: e.target.value,
+                              };
+                              setEditingQuestion({ ...editingQuestion, choices: next });
+                            }}
+                          >
+                            <option value="">None</option>
+                            {symptomCategories.map((categoryOption) => {
+                              const categoryValue = String(
+                                categoryOption?.symptom_category_id ?? ""
+                              );
+                              const categoryLabel = String(categoryOption?.category ?? "");
+
+                              return (
+                                <option
+                                  key={categoryOption?.symptom_category_id ?? categoryValue}
+                                  value={categoryValue}
+                                >
+                                  {categoryLabel}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
 
 
                         <input
@@ -562,25 +764,26 @@ export default function QuestionModal({
                         />
 
                         <button
-                            onClick={() =>
-                            setEditingQuestion({
-                                ...editingQuestion,
-                              choices: normalizedChoices.filter(
-                                (_, i) => i !== originalIndex
-                                ),
-                            })
-                            }
-                            style={{
-                            background: "transparent",
-                            border: "none",
-                            cursor: "pointer",
-                            }}
+                          onClick={() =>
+                          setEditingQuestion({
+                            ...editingQuestion,
+                            choices: normalizedChoices.filter(
+                            (_, i) => i !== originalIndex
+                            ),
+                          })
+                          }
+                          style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          }}
                         >
-                            ❌
+                          ❌
                         </button>
-                        </div>
+                        </React.Fragment>
                     );
-                    })}
+                      })}
+                    </div>
 
                 {!editingQuestion.use_default_options && (
                   <button
@@ -600,12 +803,17 @@ export default function QuestionModal({
                         ...editingQuestion,
                         choices: [
                             ...normalizedChoices,
-                            {
-                            option: "",
-                            report_verbiage: "",
-                            value: 0,
-                            order: normalizedChoices.length + 1,
-                            },
+                            normalizeChoiceForEditing(
+                              {
+                                option: "",
+                                option_more_info: "",
+                                category: "",
+                                report_verbiage: "",
+                                value: 0,
+                                order: normalizedChoices.length + 1,
+                              },
+                              normalizedChoices.length + 1
+                            ),
                         ],
                         })
                           }

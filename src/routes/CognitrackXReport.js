@@ -1,4 +1,5 @@
 import React from "react";
+import { apiFetch } from "../api";
 import {
   FaBook,
   FaBrain,
@@ -133,6 +134,96 @@ const getResponseAnswerValue = (responseItem) =>
 const getResponseByQuestionId = (responses, questionId) =>
   (responses || []).find((responseItem) => getResponseQuestionId(responseItem) === questionId) || null;
 
+const extractCategoryIds = (answerValue) => {
+  if (Array.isArray(answerValue)) {
+    return answerValue.flatMap((entry) => extractCategoryIds(entry));
+  }
+
+  if (answerValue && typeof answerValue === "object") {
+    const directCategory = Number(answerValue?.category);
+    if (Number.isFinite(directCategory)) {
+      return [directCategory];
+    }
+
+    return Object.values(answerValue).flatMap((entry) => extractCategoryIds(entry));
+  }
+
+  return [];
+};
+
+const parseReportSummaryAlert = (reportSummary) => {
+  const normalizedSummary = String(reportSummary ?? "").trim();
+  if (!normalizedSummary) return null;
+
+  const headingMatch = normalizedSummary.match(/<h>([\s\S]*?)<\/h>/i);
+  const heading = String(headingMatch?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
+  const summary = normalizedSummary
+    .replace(/^[\s\S]*?<\/h>/i, "")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+
+  if (!heading && !summary) return null;
+
+  return {
+    heading,
+    summary,
+  };
+};
+
+const extractCategorySymptomGroups = (answerValue) => {
+  const categoryGroups = new Map();
+
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, "option")) {
+      const categoryId = Number(value?.category);
+      const symptomLabel = String(value?.option ?? "").trim();
+
+      if (Number.isFinite(categoryId) && categoryId > 0 && categoryId !== 6 && symptomLabel) {
+        const existingGroup = categoryGroups.get(categoryId) || {
+          categoryId,
+          count: 0,
+          symptoms: new Set(),
+        };
+
+        existingGroup.count += 1;
+        existingGroup.symptoms.add(symptomLabel);
+        categoryGroups.set(categoryId, existingGroup);
+      }
+
+      return;
+    }
+
+    Object.values(value).forEach(visit);
+  };
+
+  visit(answerValue);
+
+  return Array.from(categoryGroups.values())
+    .map((group) => ({
+      categoryId: group.categoryId,
+      count: group.count,
+      symptoms: Array.from(group.symptoms).sort((left, right) =>
+        left.localeCompare(right, undefined, { sensitivity: "base" })
+      ),
+    }))
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+
+      return left.categoryId - right.categoryId;
+    });
+};
+
 const extractOptionValues = (answerValue) => {
   if (Array.isArray(answerValue)) {
     return answerValue.flatMap((entry) => extractOptionValues(entry));
@@ -148,6 +239,145 @@ const extractOptionValues = (answerValue) => {
   }
 
   return [];
+};
+
+const parseStructuredReportSummaryCard = (reportSummary, symptomListText) => {
+  const normalizedSummary = String(reportSummary ?? "")
+    .replace(/\{symtoms\}/gi, `<b>${symptomListText}</b>`)
+    .replace(/\{symptoms\}/gi, `<b>${symptomListText}</b>`)
+    .trim();
+
+  if (!normalizedSummary) {
+    return null;
+  }
+
+  const tokens = normalizedSummary
+    .split(/(<\/??h>|<\/??b>|<\/??cb>|<br\s*\/?>)/i)
+    .filter((token) => token !== "");
+
+  let heading = "";
+  let headingCount = 0;
+  let insideHeading = false;
+  let insideBold = false;
+  let insideCheckbox = false;
+  let headingSegments = [];
+  let currentLineSegments = [];
+  const bodyLines = [];
+
+  const mergeSegments = (segments) => {
+    const merged = [];
+
+    segments.forEach((segment) => {
+      const text = String(segment?.text ?? "");
+      if (!text) return;
+
+      const previousSegment = merged[merged.length - 1];
+      if (previousSegment && previousSegment.bold === Boolean(segment?.bold)) {
+        previousSegment.text += text;
+        return;
+      }
+
+      merged.push({
+        text,
+        bold: Boolean(segment?.bold),
+      });
+    });
+
+    return merged;
+  };
+
+  const flushBodyLine = () => {
+    const mergedSegments = mergeSegments(currentLineSegments);
+    const plainText = mergedSegments.map((segment) => segment.text).join("").trim();
+    if (!plainText) {
+      currentLineSegments = [];
+      return;
+    }
+
+    bodyLines.push({
+      segments: mergedSegments,
+      checkbox: insideCheckbox,
+    });
+    currentLineSegments = [];
+  };
+
+  tokens.forEach((token) => {
+    if (/^<h>$/i.test(token)) {
+      flushBodyLine();
+      insideHeading = true;
+      headingCount += 1;
+      headingSegments = [];
+      return;
+    }
+
+    if (/^<\/h>$/i.test(token)) {
+      const normalizedHeadingSegments = mergeSegments(headingSegments).map((segment) => ({
+        text: segment.text.replace(/<[^>]+>/g, ""),
+        bold: true,
+      }));
+      const headingText = normalizedHeadingSegments
+        .map((segment) => segment.text)
+        .join("")
+        .trim();
+
+      if (headingText) {
+        if (headingCount === 1) {
+          heading = headingText;
+        } else {
+          bodyLines.push({ segments: normalizedHeadingSegments });
+        }
+      }
+
+      insideHeading = false;
+      headingSegments = [];
+      return;
+    }
+
+    if (/^<b>$/i.test(token)) {
+      insideBold = true;
+      return;
+    }
+
+    if (/^<\/b>$/i.test(token)) {
+      insideBold = false;
+      return;
+    }
+
+    if (/^<cb>$/i.test(token)) {
+      flushBodyLine();
+      insideCheckbox = true;
+      return;
+    }
+
+    if (/^<\/cb>$/i.test(token)) {
+      flushBodyLine();
+      insideCheckbox = false;
+      return;
+    }
+
+    if (/^<br\s*\/?>$/i.test(token)) {
+      flushBodyLine();
+      return;
+    }
+
+    if (insideHeading) {
+      headingSegments.push({ text: token, bold: insideBold });
+      return;
+    }
+
+    currentLineSegments.push({ text: token, bold: insideBold });
+  });
+
+  flushBodyLine();
+
+  if (!heading && !bodyLines.length) {
+    return null;
+  }
+
+  return {
+    heading,
+    bodyLines,
+  };
 };
 
 const extractTimelinePills = (answerValue) => {
@@ -497,49 +727,17 @@ const reportData = {
   outline: [
     {
       step: "STEP 1",
-      title: "Formal Diagnosis & Full Neurocognitive Evaluation",
+      title: "Referral for Formal Diagnostic Evaluation",
       icon: FaClipboardCheck,
       useStepPill: true,
       introText:
-        "A formal diagnosis is critical at this juncture. The CogniTrackX screening provides an initial indicator of neurocognitive impact, but a comprehensive clinical evaluation is required to establish diagnosis, severity, and a personalized treatment pathway.",
+        "Establishing a diagnosis, characterizing severity, and identifying contributing factors require formal evaluation by appropriately qualified providers",
+      requiredEvaluationsHeading: "RECOMMENDED REFERRALS",
       requiredEvaluations: [
         {
-          title: "Formal TBI Diagnosis",
-          description: "By a board-certified neurologist or neuropsychologist with documented TBI specialization.",
-        },
-        {
-          title: "Full Neurocognitive Evaluation",
+          title: "Evaluation by a clinician familiar with brain injury",
           description:
-            "Comprehensive assessment of memory, attention, processing speed, and executive function using validated instruments.",
-        },
-        {
-          title: "Neurobehavioral Scoring & Assessment",
-          description:
-            "Evaluating emotional regulation, impulse control, and behavioral changes post-injury through standardized behavioral instruments.",
-        },
-        {
-          title: "Baseline Functional Assessment",
-          description:
-            "Documents pre-treatment functional status to enable accurate ongoing comparison and treatment progress tracking.",
-        },
-      ],
-      neuroimagingDescription:
-        "Depending on the findings of the formal diagnosis and full evaluation, advanced neuroimaging may be indicated:",
-      neuroimagingEvaluations: [
-        {
-          title: "MRI-DTI (Diffusion Tensor Imaging)",
-          description:
-            "The gold standard for identifying white matter tract damage not visible on standard MRI — highly recommended for moderate-to-severe presentations.",
-        },
-        {
-          title: "Standard MRI or CT",
-          description:
-            "Indicated where acute structural findings such as hemorrhage or contusion are suspected.",
-        },
-        {
-          title: "Functional Neuroimaging (fMRI or SPECT)",
-          description:
-            "For complex or chronic presentations where structural imaging may be insufficient to capture functional deficits.",
+            "Evaluation by a clinician familiar with brain injury (neurology, physiatry, neuropsychologist, or primary care with TBI experience) to address physical symptoms, manage medications, assess cognition, document functional changes, and determine whether additional workup is indicated.",
         },
       ],
       documentationStandard:
@@ -547,72 +745,26 @@ const reportData = {
     },
     {
       step: "STEP 2",
-      title: "Treatment Plan & Therapeutic Interventions",
+      title: "Symptom Monitoring & Longitudinal Tracking",
       icon: FaBrain,
       useStepPill: true,
       introText:
-        "Based on Valhalla Health's clinical experience across more than 50,000 TBI treatments, the following evidence-informed and documented protocols have demonstrated meaningful efficacy in TBI recovery. Treatment plans should be individualized to the patient's specific diagnosis, symptom profile, and functional goals.",
+        "Post-injury symptom trajectories vary widely, with patterns of recovery, plateau, and late emergence that single-timepoint assessment cannot capture. Repeated measurement over time is necessary to characterize clinical course.",
       protocolSections: [
         {
-          heading: "CELLULAR & NEUROMODULATION PROTOCOLS",
+          heading: "RECOMMENDED MONITORING APPROACH",
           items: [
             {
-              title: "Photobiomodulation (PBM) Therapy",
-              description: "Documented light-based protocols targeting neuroinflammation and mitochondrial function.",
+              title: "Re-screening at clinically appropriate intervals",
+              description: "to document symptom trajectory (emerging, persisting, resolving, worsening).",
             },
             {
-              title: "Neuromodulation Protocols",
-              description: "Including tDCS and related modalities targeting neural circuit regulation and recovery.",
+              title: "Comparison against pre-injury baseline and acute presentation",
+              description: "to distinguish injury-related change from premorbid functioning.",
             },
             {
-              title: "Nebulized Exosome Therapy",
-              description: "Emerging regenerative protocol demonstrating efficacy in neuroinflammation and recovery support.",
-            },
-          ],
-        },
-        {
-          heading: "PHYSICAL & SENSORIMOTOR REHABILITATION",
-          items: [
-            {
-              title: "Vestibular Rehabilitation",
-              description:
-                "Critical for patients presenting with dizziness, balance deficits, or post-concussive vestibular dysfunction — a highly common TBI sequela.",
-            },
-            {
-              title: "Neuro-Ocular Motor Rehabilitation",
-              description:
-                "Addressing vision processing disruptions, convergence insufficiency, and saccadic dysfunction — common following TBI and frequently underdiagnosed.",
-            },
-            {
-              title: "Physical Therapy (TBI-Specific Protocols)",
-              description:
-                "Targeting fatigue management, coordination deficits, and functional mobility with protocols adapted for post-TBI presentations.",
-            },
-          ],
-        },
-        {
-          heading: "COGNITIVE & BEHAVIORAL THERAPIES",
-          description: "The following psychotherapeutic modalities have shown particular efficacy in TBI populations:",
-          items: [
-            {
-              title: "Cognitive Behavioral Therapy (CBT)",
-              description:
-                "Specifically adapted protocols for post-injury cognitive and emotional dysregulation — well-supported by TBI outcome literature.",
-            },
-            {
-              title: "EMDR (Eye Movement Desensitization and Reprocessing)",
-              description:
-                "Particularly effective where trauma and TBI co-occur, which is common in motor vehicle accident and assault populations.",
-            },
-            {
-              title: "ART (Accelerated Resolution Therapy)",
-              description:
-                "A rapid, evidence-based trauma therapy with growing TBI application data and strong patient-reported outcomes.",
-            },
-            {
-              title: "Cognitive Rehabilitation Therapy (CRT)",
-              description:
-                "Structured, systematic retraining of memory, attention, and executive function through individualized cognitive exercises.",
+              title: "Documentation of functional status across domains",
+              description: "relevant to daily life, work, and relationships.",
             },
           ],
         },
@@ -620,43 +772,56 @@ const reportData = {
     },
     {
       step: "STEP 3",
-      title: "Comorbid Psychological Assessment",
+      title: "Treatment Planning - Based on Symptom Presentation",
       icon: FaStethoscope,
       useStepPill: true,
+      introText: "",
+      infoCard: {
+        title: "Disclaimer",
+        description:
+          "Treatment for post-injury symptoms is individualized and should be directed by the treating clinician(s) based on formal evaluation findings. The recommendation categories below are based on this patient's endorsements of persisting, worsening, or newly emerged symptoms. Each recommendation begins with a referral to an appropriate specialist for assessment; treatment within the category should follow only if warranted by that specialist's evaluation.",
+      },
+      protocolSections: [],
+    },
+    {
+      step: "STEP 4",
+      title: "Adjunctive and Emerging Therapies",
+      icon: FaLightbulb,
+      useStepPill: true,
       introText:
-        "TBI frequently co-occurs with significant psychological sequelae that require independent evaluation and treatment. Failure to identify and address these conditions can substantially impede recovery and functional outcomes.",
+        "A range of adjunctive and emerging therapies have generated growing interest in the TBI clinical and research communities. Their evidence bases vary considerably across modalities and indications, and none of these therapies replaces the foundational specialist evaluation and treatment pathways already recommended. The categories below are surfaced for the patient's awareness and for discussion with their treating team. Decisions about whether to incorporate any specific modality should be made by qualified providers based on the patient's diagnostic profile, clinical needs, and informed discussion of the current evidence base.",
       protocolSections: [
         {
-          heading: "ASSESSMENTS WARRANTED",
           items: [
             {
-              title: "Depression Screening",
+              title: "Photobiomodulation and light-based therapies",
               description:
-                "Using validated instruments (PHQ-9, BDI-II) given the high prevalence of post-TBI depressive disorder across all severity levels.",
+                "Photobiomodulation refers to the therapeutic application of specific wavelengths of light, with emerging evidence in TBI focused on effects related to mitochondrial function and neuroinflammation. The clinical evidence base is growing but remains heterogeneous across protocols and patient populations. Patients considering this modality should engage in an evidence-informed discussion with their treating team.",
             },
             {
-              title: "Anxiety Evaluation",
+              title: "Nutritional, dietary, and supplement-based support",
               description:
-                "Generalized anxiety and panic presentations are common post-injury and require targeted intervention — often undertreated in TBI populations.",
+                "A range of nutritional approaches have been examined in the context of TBI recovery, including dietary patterns intended to reduce systemic inflammation and specific supplements with proposed neuroprotective or neuroinflammatory-modulating effects. Evidence varies substantially across approaches. Any supplement use should be reviewed with the treating medical provider to assess appropriateness, dosing, and potential interactions with other medications.",
             },
             {
-              title: "PTSD Assessment",
+              title: "Mind-body and integrative approaches",
               description:
-                "Particularly where the injury occurred in the context of a traumatic event. Use of PCL-5 or clinician-administered CAPS-5 is recommended.",
+                "Mindfulness-based interventions, biofeedback, breathwork, and related integrative approaches have been examined as adjuncts in post-injury symptom management, particularly for stress, sleep, and autonomic symptoms. These approaches are generally well tolerated and may be considered as complements to specialist-directed care when clinically appropriate.",
             },
             {
-              title: "Sleep Disorder Screening",
+              title: "Regenerative and cellular protocols (investigational)",
               description:
-                "Disrupted sleep architecture is both a symptom and a driver of TBI recovery impairment — identifying and treating sleep disorders significantly improves overall outcomes.",
+                "Regenerative approaches, including exosome-based and related cellular protocols, are an active area of investigation in TBI. The clinical evidence base remains early, and these protocols are typically considered investigational. Patients exploring these options should do so with full awareness of the current evidence limitations and in close consultation with qualified providers.",
             },
           ],
         },
       ],
+      protocolNoteTitle: "Note on Evidence and Selection",
       protocolNote:
-        "These assessments should be conducted by licensed mental health professionals with documented TBI experience. Providers must use standardized, validated instruments and report quantitative scoring for all evaluations — narrative-only reports are insufficient.",
+        "Patients and their treating teams are encouraged to evaluate any adjunctive therapy on the basis of (1) the current published evidence for the specific indication, (2) the credentials and documentation practices of any provider offering the therapy, and (3) coordination with the broader treatment plan.",
     },
     {
-      step: "STEP 4",
+      step: "STEP 5",
       title: "Provider Selection & Documentation Standards",
       icon: FaUserMd,
       useStepPill: true,
@@ -979,7 +1144,7 @@ function OutlineStep({ item }) {
             <div style={{ marginTop: "14px" }}>
               <div style={{ ...mutedTextStyle, fontSize: "0.84rem", lineHeight: 1.65 }}>{item.introText}</div>
               <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.82rem", letterSpacing: "0.06em", marginTop: "16px", marginBottom: "10px" }}>
-                REQUIRED EVALUATIONS
+                {item.requiredEvaluationsHeading || "REQUIRED EVALUATIONS"}
               </div>
               {item.requiredEvaluations.map((evaluation, index) => (
                 <div
@@ -1001,29 +1166,63 @@ function OutlineStep({ item }) {
                 </div>
               ))}
 
-              <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.82rem", letterSpacing: "0.06em", marginTop: "18px", marginBottom: "8px" }}>
-                NEUROIMAGING — WHEN WARRANTED
-              </div>
-              <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.6, marginBottom: "12px" }}>{item.neuroimagingDescription}</div>
-              {item.neuroimagingEvaluations.map((evaluation, index) => (
+              {Array.isArray(item.neuroimagingEvaluations) && item.neuroimagingEvaluations.length > 0 ? (
+                <>
+                  <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.82rem", letterSpacing: "0.06em", marginTop: "18px", marginBottom: "8px" }}>
+                    NEUROIMAGING - WHEN WARRANTED
+                  </div>
+                  {item.neuroimagingDescription ? (
+                    <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.6, marginBottom: "12px" }}>{item.neuroimagingDescription}</div>
+                  ) : null}
+                  {item.neuroimagingEvaluations.map((evaluation, index) => (
+                    <div
+                      key={`${item.step}-${evaluation.title}`}
+                      style={{
+                        display: "flex",
+                        gap: "9px",
+                        alignItems: "flex-start",
+                        paddingBottom: index === item.neuroimagingEvaluations.length - 1 ? 0 : "12px",
+                        marginBottom: index === item.neuroimagingEvaluations.length - 1 ? 0 : "12px",
+                        borderBottom: index === item.neuroimagingEvaluations.length - 1 ? "none" : "1px solid #24324e",
+                      }}
+                    >
+                      <FaCheckSquare style={{ color: "#7dd3fc", marginTop: "2px", flexShrink: 0, fontSize: "0.82rem" }} />
+                      <div>
+                        <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.84rem" }}>{evaluation.title}</div>
+                        <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.55, marginTop: "4px" }}>{evaluation.description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              ) : null}
+
+              {item.alertCard ? (
                 <div
-                  key={`${item.step}-${evaluation.title}`}
                   style={{
-                    display: "flex",
-                    gap: "9px",
-                    alignItems: "flex-start",
-                    paddingBottom: index === item.neuroimagingEvaluations.length - 1 ? 0 : "12px",
-                    marginBottom: index === item.neuroimagingEvaluations.length - 1 ? 0 : "12px",
-                    borderBottom: index === item.neuroimagingEvaluations.length - 1 ? "none" : "1px solid #24324e",
+                    marginTop: "18px",
+                    background: "rgba(248, 113, 113, 0.12)",
+                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                    borderRadius: "10px",
+                    padding: "12px 14px",
                   }}
                 >
-                  <FaCheckSquare style={{ color: "#7dd3fc", marginTop: "2px", flexShrink: 0, fontSize: "0.82rem" }} />
-                  <div>
-                    <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.84rem" }}>{evaluation.title}</div>
-                    <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.55, marginTop: "4px" }}>{evaluation.description}</div>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                    <FaExclamationCircle style={{ color: "#fca5a5", marginTop: "2px", flexShrink: 0 }} />
+                    <div>
+                      {item.alertCard.heading ? (
+                        <div style={{ color: "#fee2e2", fontWeight: 800, fontSize: "0.86rem" }}>
+                          {item.alertCard.heading}
+                        </div>
+                      ) : null}
+                      {item.alertCard.summary ? (
+                        <div style={{ color: "#fecaca", fontWeight: 700, fontSize: "0.82rem", lineHeight: 1.6, marginTop: item.alertCard.heading ? "6px" : 0 }}>
+                          {item.alertCard.summary}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-              ))}
+              ) : null}
 
               <div
                 style={{
@@ -1040,7 +1239,28 @@ function OutlineStep({ item }) {
             </div>
           ) : hasCustomProtocolLayout ? (
             <div style={{ marginTop: "14px" }}>
-              <div style={{ ...mutedTextStyle, fontSize: "0.84rem", lineHeight: 1.65 }}>{item.introText}</div>
+              {item.introText ? (
+                <div style={{ ...mutedTextStyle, fontSize: "0.84rem", lineHeight: 1.65 }}>{item.introText}</div>
+              ) : null}
+
+              {item.infoCard ? (
+                <div
+                  style={{
+                    marginTop: item.introText ? "16px" : 0,
+                    background: "rgba(125, 211, 252, 0.08)",
+                    border: "1px solid rgba(125, 211, 252, 0.18)",
+                    borderRadius: "10px",
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.86rem", marginBottom: "6px" }}>
+                    {item.infoCard.title}
+                  </div>
+                  <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.6 }}>
+                    {item.infoCard.description}
+                  </div>
+                </div>
+              ) : null}
 
               {item.protocolSections.map((section, sectionIndex) => (
                 <div key={`${item.step}-${section.heading || sectionIndex}`} style={{ marginTop: sectionIndex === 0 ? "16px" : "18px" }}>
@@ -1074,6 +1294,68 @@ function OutlineStep({ item }) {
                 </div>
               ))}
 
+              {Array.isArray(item.dynamicCards) && item.dynamicCards.length > 0
+                ? item.dynamicCards.map((card, cardIndex) => (
+                    <div
+                      key={`${item.step}-dynamic-card-${card.categoryId ?? cardIndex}`}
+                      style={{
+                        ...cardStyle,
+                        background: "#111a2b",
+                        padding: "14px",
+                        marginTop:
+                          item.protocolSections.length === 0 && cardIndex === 0
+                            ? (item.infoCard || item.introText ? "16px" : 0)
+                            : "16px",
+                        border: "1px solid #24324e",
+                      }}
+                    >
+                      {card.heading ? (
+                        <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.92rem", marginBottom: "8px" }}>
+                          {card.heading}
+                        </div>
+                      ) : null}
+                      {(card.bodyLines || []).map((line, lineIndex) => (
+                        line.checkbox ? (
+                          <div
+                            key={`${item.step}-dynamic-card-line-${card.categoryId ?? cardIndex}-${lineIndex}`}
+                            style={{
+                              display: "flex",
+                              gap: "9px",
+                              alignItems: "flex-start",
+                              marginTop: lineIndex === 0 ? 0 : "8px",
+                            }}
+                          >
+                            <FaCheckSquare style={{ color: "#7dd3fc", marginTop: "2px", flexShrink: 0, fontSize: "0.82rem" }} />
+                            <div style={{ color: mutedTextStyle.color, fontSize: "0.8rem", lineHeight: 1.55 }}>
+                              {line.segments.map((segment, segmentIndex) => (
+                                <React.Fragment key={`${item.step}-dynamic-card-segment-${card.categoryId ?? cardIndex}-${lineIndex}-${segmentIndex}`}>
+                                  {segment.bold ? <strong style={{ color: "#f8fbff", fontWeight: 700 }}>{segment.text}</strong> : segment.text}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            key={`${item.step}-dynamic-card-line-${card.categoryId ?? cardIndex}-${lineIndex}`}
+                            style={{
+                              color: mutedTextStyle.color,
+                              fontSize: "0.8rem",
+                              lineHeight: 1.6,
+                              marginTop: lineIndex === 0 ? 0 : "6px",
+                            }}
+                          >
+                            {line.segments.map((segment, segmentIndex) => (
+                              <React.Fragment key={`${item.step}-dynamic-card-segment-${card.categoryId ?? cardIndex}-${lineIndex}-${segmentIndex}`}>
+                                {segment.bold ? <strong style={{ color: "#f8fbff", fontWeight: 700 }}>{segment.text}</strong> : segment.text}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  ))
+                : null}
+
               {item.protocolNote ? (
                 <div
                   style={{
@@ -1084,40 +1366,53 @@ function OutlineStep({ item }) {
                     padding: "12px",
                   }}
                 >
+                  {item.protocolNoteTitle ? (
+                    <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.82rem", marginBottom: "6px" }}>
+                      {item.protocolNoteTitle}
+                    </div>
+                  ) : null}
                   <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.6 }}>{item.protocolNote}</div>
                 </div>
               ) : null}
             </div>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px", marginTop: "14px" }}>
-                {item.sections.map((section) => (
-                  <div key={`${item.step}-${section.heading}`} style={{ background: "#121c2e", border: "1px solid #263556", borderRadius: "10px", padding: "12px" }}>
-                    <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.86rem", marginBottom: "8px" }}>{section.heading}</div>
-                    {section.items.map((entry) => (
-                      <div key={entry} style={{ display: "flex", gap: "8px", marginBottom: "7px", alignItems: "flex-start" }}>
-                        <FaChevronRight style={{ color: "#7dd3fc", marginTop: "3px", flexShrink: 0, fontSize: "0.7rem" }} />
-                        <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.5 }}>{entry}</div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
+              {item.description ? (
+                <div style={{ ...mutedTextStyle, fontSize: "0.84rem", lineHeight: 1.65, marginTop: "14px" }}>{item.description}</div>
+              ) : null}
 
-              <div
-                style={{
-                  marginTop: "14px",
-                  padding: "11px 12px",
-                  borderRadius: "10px",
-                  background: "rgba(125, 211, 252, 0.08)",
-                  border: "1px solid rgba(125, 211, 252, 0.18)",
-                  color: "#cfe9fb",
-                  fontSize: "0.82rem",
-                  lineHeight: 1.55,
-                }}
-              >
-                {item.callout}
-              </div>
+              {Array.isArray(item.sections) && item.sections.length > 0 ? (
+                <div style={{ display: "grid", gap: "10px", marginTop: "16px" }}>
+                  {item.sections.map((section) => (
+                    <div key={`${item.step}-${section.heading}`} style={{ background: "#121c2e", border: "1px solid #263556", borderRadius: "10px", padding: "12px" }}>
+                      <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.86rem", marginBottom: "8px" }}>{section.heading}</div>
+                      {section.items.map((entry) => (
+                        <div key={entry} style={{ display: "flex", gap: "8px", marginBottom: "7px", alignItems: "flex-start" }}>
+                          <FaChevronRight style={{ color: "#7dd3fc", marginTop: "3px", flexShrink: 0, fontSize: "0.7rem" }} />
+                          <div style={{ ...mutedTextStyle, fontSize: "0.8rem", lineHeight: 1.5 }}>{entry}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {item.callout ? (
+                <div
+                  style={{
+                    marginTop: "14px",
+                    padding: "11px 12px",
+                    borderRadius: "10px",
+                    background: "rgba(125, 211, 252, 0.08)",
+                    border: "1px solid rgba(125, 211, 252, 0.18)",
+                    color: "#cfe9fb",
+                    fontSize: "0.82rem",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {item.callout}
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -1126,7 +1421,23 @@ function OutlineStep({ item }) {
   );
 }
 
+function TimelyActionCard() {
+  return (
+    <div style={{ ...cardStyle, background: "#111a2b", padding: "14px", marginBottom: "14px", borderLeft: "4px solid #facc15" }}>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        <FaShieldAlt style={{ color: "#facc15" }} />
+        <div style={{ color: "#f8fbff", fontWeight: 800, fontSize: "0.92rem" }}>Why timely action matters</div>
+      </div>
+      <div style={{ ...mutedTextStyle, fontSize: "0.82rem", lineHeight: 1.6, marginTop: "7px" }}>
+        Research consistently demonstrates that early intervention following TBI is associated with better patient outcomes. Delays in diagnosis and treatment may allow symptoms to progress and may reduce the window for best outcomes. Prompt initiation of the steps outlined in this plan is therefore strongly encouraged.
+      </div>
+    </div>
+  );
+}
+
 export default function CognitrackXReport({ assessmentName = "Assessment", reportFields = {}, reportAttempt = null, assessmentResponses = [] }) {
+  const [categorySixAlertCard, setCategorySixAlertCard] = React.useState(null);
+  const [step3CategoryCards, setStep3CategoryCards] = React.useState([]);
   const resolvedClassification = String(reportAttempt?.classification ?? "").trim() || "Likely TBI";
   const normalizedClassification = resolvedClassification.toLowerCase();
   const completedAtLabel = formatAttemptCompletedDate(reportAttempt?.completed_at ?? reportAttempt?.completedAt);
@@ -1156,6 +1467,99 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const baselineResponse = getResponseByQuestionId(assessmentResponses, 31);
   const acuteResponse = getResponseByQuestionId(assessmentResponses, 33);
   const currentResponse = getResponseByQuestionId(assessmentResponses, 35);
+  const currentResponseAnswerValue = React.useMemo(
+    () => getResponseAnswerValue(currentResponse),
+    [currentResponse]
+  );
+  const currentResponseCategoryIds = React.useMemo(
+    () => extractCategoryIds(currentResponseAnswerValue),
+    [currentResponseAnswerValue]
+  );
+  const currentResponseCategoryGroups = React.useMemo(
+    () => extractCategorySymptomGroups(currentResponseAnswerValue),
+    [currentResponseAnswerValue]
+  );
+  const hasCurrentResponseCategorySix = currentResponseCategoryIds.includes(6);
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    if (!hasCurrentResponseCategorySix) {
+      setCategorySixAlertCard(null);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const loadCategorySixAlert = async () => {
+      try {
+        const payload = await apiFetch("/api/symptom-categories/6");
+        const parsedAlert = parseReportSummaryAlert(payload?.report_summary);
+
+        if (!isCancelled) {
+          setCategorySixAlertCard(parsedAlert);
+        }
+      } catch {
+        if (!isCancelled) {
+          setCategorySixAlertCard(null);
+        }
+      }
+    };
+
+    loadCategorySixAlert();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasCurrentResponseCategorySix]);
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    if (!currentResponseCategoryGroups.length) {
+      setStep3CategoryCards([]);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const loadStep3CategoryCards = async () => {
+      const cardResults = await Promise.all(
+        currentResponseCategoryGroups.map(async (group) => {
+          try {
+            const payload = await apiFetch(`/api/symptom-categories/${group.categoryId}`);
+            const symptomListText = group.symptoms.join(", ");
+            const parsedCard = parseStructuredReportSummaryCard(
+              payload?.report_summary,
+              symptomListText
+            );
+
+            if (!parsedCard) {
+              return null;
+            }
+
+            return {
+              categoryId: group.categoryId,
+              count: group.count,
+              ...parsedCard,
+            };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      if (!isCancelled) {
+        setStep3CategoryCards(cardResults.filter(Boolean));
+      }
+    };
+
+    loadStep3CategoryCards();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentResponseCategoryGroups]);
   const selfReportedLocPrimaryResponse = getResponseByQuestionId(assessmentResponses, 18);
   const selfReportedLocSecondaryResponse = getResponseByQuestionId(assessmentResponses, 19);
   const witnessedLocResponse = getResponseByQuestionId(assessmentResponses, 20);
@@ -1175,7 +1579,7 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   );
   const baselineCalcValue = countPositiveAnswerValueEntries(getResponseAnswerValue(baselineResponse));
   const acuteCalcValue = countPositiveAnswerValueEntries(getResponseAnswerValue(acuteResponse));
-  const currentCalcValue = countPositiveAnswerValueEntries(getResponseAnswerValue(currentResponse));
+  const currentCalcValue = countPositiveAnswerValueEntries(currentResponseAnswerValue);
   const selfReportedLocPrimaryCalcValue = getResponseCalcValue(selfReportedLocPrimaryResponse);
   const selfReportedLocSecondaryCalcValue = getResponseCalcValue(selfReportedLocSecondaryResponse);
   const witnessedLocCalcValue = getResponseCalcValue(witnessedLocResponse);
@@ -1184,7 +1588,7 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const witnessedAocCalcValue = getResponseCalcValue(witnessedAocResponse);
   const preInjurySymptomPills = getUniqueTimelinePills(getResponseAnswerValue(baselineResponse));
   const symptomsWithin72HoursPills = getUniqueTimelinePills(getResponseAnswerValue(acuteResponse));
-  const persistingSymptomsPills = getUniqueTimelinePills(getResponseAnswerValue(currentResponse));
+  const persistingSymptomsPills = getUniqueTimelinePills(currentResponseAnswerValue);
   const baselineOptionSet = getTimelinePillLabelSet(preInjurySymptomPills);
   const symptomsWithin72HoursNewOptionSet = new Set(
     symptomsWithin72HoursPills
@@ -1264,15 +1668,15 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
 
   const visibleConcerns = reportData.concerns.filter((concern) => {
     if (concern.label === "LOC") {
-      return resolvedLocConcernScore > 0;
+      return resolvedLocConcernScore > 2;
     }
 
     if (concern.label === "AOC") {
-      return resolvedAocConcernScore > 0;
+      return resolvedAocConcernScore > 2;
     }
 
     if (concern.label === "PTA") {
-      return resolvedPtaConcernScore > 0;
+      return resolvedPtaConcernScore > 2;
     }
 
     return true;
@@ -1290,6 +1694,54 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
     { label: "Date of Injury", value: formatReportFieldValue(reportFields.dateOfInjury) },
     { label: "Date of Assessment", value: formatReportFieldValue(reportFields.dateOfAssessment) },
   ];
+  const reportGeneratedDate = new Date().toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const shouldShowProviderSteps =
+    normalizedClassification === "likely tbi" || normalizedClassification === "probable tbi";
+
+  const resolvedOutline = reportData.outline
+    .filter((item) => {
+      if (item.step === "STEP 4" || item.step === "STEP 5") {
+        return shouldShowProviderSteps;
+      }
+
+      return true;
+    })
+    .map((item) => {
+    if (item.step === "STEP 1") {
+      if (!categorySixAlertCard) {
+        return item;
+      }
+
+      return {
+        ...item,
+        alertCard: categorySixAlertCard,
+      };
+    }
+
+    if (item.step === "STEP 3") {
+      return {
+        ...item,
+        dynamicCards: step3CategoryCards,
+      };
+    }
+
+      return item;
+    });
+
+  const outlineItemByStep = new Map(resolvedOutline.map((item) => [item.step, item]));
+  const renderedPlanItems = [
+    outlineItemByStep.get("STEP 1"),
+    outlineItemByStep.get("STEP 2"),
+    outlineItemByStep.get("STEP 3"),
+    shouldShowProviderSteps ? { kind: "timely_action" } : null,
+    outlineItemByStep.get("STEP 4"),
+    outlineItemByStep.get("STEP 5"),
+  ].filter(Boolean);
 
   const resolvedReportData = {
     ...reportData,
@@ -1297,6 +1749,7 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
       ...reportData.patient,
       fields: resolvedPatientFields,
     },
+    outline: resolvedOutline,
   };
   const formatSymptomCount = (pillValues) => `${pillValues.length} symptom${pillValues.length === 1 ? "" : "s"}`;
   const resolvedTimelineGroups = reportData.timelineGroups.map((group) => {
@@ -1657,29 +2110,13 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
             }}
           />
           <div style={{ padding: "14px" }}>
-            <div style={{ ...cardStyle, background: "#111a2b", padding: "12px 14px", marginBottom: "14px", borderLeft: "4px solid #facc15" }}>
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                <FaLightbulb style={{ color: "#facc15" }} />
-                <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.86rem" }}>Important</div>
-              </div>
-              <div style={{ ...mutedTextStyle, fontSize: "0.82rem", lineHeight: 1.6, marginTop: "7px" }}>
-                The following recommendations are based on the patient's screening profile and are intended to guide clinical decision-making. All interventions should be reviewed and ordered by a qualified treating provider. Given the Likely TBI classification and ongoing symptom burden, prompt initiation of multidisciplinary care is strongly advised.
-              </div>
-            </div>
-
-            {reportData.outline.map((item) => (
-              <OutlineStep key={item.step} item={item} />
+            {renderedPlanItems.map((entry) => (
+              entry.kind === "timely_action" ? (
+                <TimelyActionCard key="timely-action-card" />
+              ) : (
+                <OutlineStep key={entry.step} item={entry} />
+              )
             ))}
-
-            <div style={{ ...cardStyle, background: "#111a2b", padding: "14px", marginTop: "16px" }}>
-              <div style={{ display: "flex", gap: "10px", alignItems: "center", color: "#f8fbff", fontWeight: 700 }}>
-                <FaShieldAlt style={{ color: "#60a5fa" }} />
-                Immediate Action Recommended
-              </div>
-              <div style={{ ...mutedTextStyle, fontSize: "0.82rem", lineHeight: 1.65, marginTop: "8px" }}>
-                Research data is unambiguous: <strong style={{ color: "#ffffff" }}>early intervention following TBI leads to the best patient outcomes.</strong> Neuroplasticity — the brain's capacity for repair and reorganization — is most active in the acute and subacute phases following injury. Delays in diagnosis and treatment allow secondary injury cascades to progress and reduce the window for maximum recovery. We strongly recommend immediate action toward all steps outlined in this plan. The Valhalla Health clinical team is available to support coordination of care, provider referrals, and clinical consultation throughout this process.
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1692,9 +2129,7 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
                 {reportData.footer.signature}
               </div>
               <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "10px", color: "#cdd7ea", fontSize: "0.78rem" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><FaCalendarAlt /> 04/23/2026</span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><FaPhoneAlt /> Valhalla clinical sample</span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><FaMapMarkerAlt /> Redacted preview only</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><FaCalendarAlt /> {reportGeneratedDate}</span>
               </div>
             </div>
           </div>
