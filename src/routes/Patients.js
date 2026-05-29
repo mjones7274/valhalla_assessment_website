@@ -584,6 +584,69 @@ const getPatientCompanyIds = (patient) =>
     .map((entry) => Number(entry?.company?.company_id ?? entry?.company_id ?? entry?.company?.id ?? 0))
     .filter((id) => Number.isFinite(id) && id > 0);
 
+const escapeHtml = (value) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
+
+const buildAssessmentLinkEmailHtml = ({ firstName, companyName, assessmentLink }) => {
+  const safeFirstName = escapeHtml(firstName || "there");
+  const safeCompanyName = escapeHtml(companyName || "your care team");
+  const safeAssessmentLink = escapeHtml(assessmentLink || "");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0; padding:0; background-color:#f4f7fb; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f7fb; margin:0; padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 18px rgba(15, 23, 42, 0.08);">
+            <tr>
+              <td style="background-color:#0f172a; padding:28px 36px; text-align:center;">
+                <h1 style="margin:0; font-size:24px; line-height:1.3; color:#ffffff; font-weight:700;">
+                  Your CogniTrackX Assessment Is Ready
+                </h1>
+                <p style="margin:10px 0 0; font-size:14px; color:#cbd5e1;">
+                  Action Required
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:36px;">
+                <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">Hi ${safeFirstName},</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Your CogniTrackX assessment is ready.</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">CogniTrackX is a standardized cognitive screening tool used by Valhalla Health to establish an objective baseline of your cognitive and neurological function. This is an important step in documenting the full impact of your injury - the results become part of your medical record and are made available to your care team and your attorney.</p>
+                <p style="margin:0 0 18px; font-size:16px; line-height:1.7;">You can complete your assessment here:</p>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
+                  <tr>
+                    <td align="center" style="border-radius:8px; background-color:#2563eb;">
+                      <a href="${safeAssessmentLink}" style="display:inline-block; padding:14px 24px; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none;">Start Your Assessment</a>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin:0 0 24px; padding:20px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
+                  <p style="margin:0 0 12px; font-size:16px; font-weight:700; color:#0f172a;">A few things to keep in mind before you begin:</p>
+                  <ul style="margin:0; padding-left:20px; font-size:15px; line-height:1.8; color:#334155;">
+                    <li>Find a quiet space with no distractions</li>
+                    <li>Complete the assessment in one sitting</li>
+                    <li>Answer honestly - there are no right or wrong responses</li>
+                    <li>The assessment takes approximately 5-8 minutes</li>
+                  </ul>
+                </div>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Your results will be processed and delivered to your file promptly. If you have any questions before or after completing your assessment, our team is available to assist you.</p>
+                <p style="margin:28px 0 0; font-size:16px; line-height:1.7;">Warm regards,<br /><strong>Valhalla Health</strong> in association with <strong>${safeCompanyName}</strong></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+};
+
 const Patients = () => {
   const { user } = useOutletContext() || {};
   const [patients, setPatients] = useState([]);
@@ -3846,6 +3909,12 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
+  const primaryCompanyName =
+    String(
+      patient?.companies?.[0]?.company?.company_name ??
+      patient?.companies?.[0]?.company_name ??
+      ""
+    ).trim() || "your care team";
   const assessmentAppBaseUrl = useMemo(() => {
     const configuredBase = String(process.env.REACT_APP_APP_URL_BASE || "").trim();
     const fallbackBase = String(window?.location?.origin || "http://localhost:3000").trim();
@@ -3916,11 +3985,16 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       throw new Error("Patient email is missing.");
     }
 
+    const emailHtml = buildAssessmentLinkEmailHtml({
+      firstName: String(patient?.first_name || "").trim() || "there",
+      companyName: primaryCompanyName,
+      assessmentLink,
+    });
+
     const basePayload = {
       to_addresses: [trimmedRecipientEmail],
-      subject: "Assessment Link",
-      body_text:
-        `Please click the assessment link below to start your assessment:\n\n${assessmentLink}`,
+      subject: "Your CogniTrackX Assessment Is Ready – Action Required",
+      body_html: emailHtml,
     };
 
     let response = await apiRequest(TEST_SEND_EMAIL_API, {
@@ -3955,7 +4029,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     throw new Error(
       `Send assessment email failed with status ${response.status}: ${normalizedError}`
     );
-  }, []);
+  }, [patient?.first_name, primaryCompanyName]);
 
   const getOrCreateAttemptToken = useCallback(async (attempt) => {
     const existingToken = String(

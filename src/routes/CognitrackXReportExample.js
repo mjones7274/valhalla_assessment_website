@@ -331,47 +331,6 @@ const reportData = {
       protocolNote:
         "These assessments should be conducted by licensed mental health professionals with documented TBI experience. Providers must use standardized, validated instruments and report quantitative scoring for all evaluations — narrative-only reports are insufficient.",
     },
-    {
-      step: "STEP 4",
-      title: "Provider Selection & Documentation Standards",
-      icon: FaUserMd,
-      useStepPill: true,
-      introText:
-        "The quality and completeness of clinical documentation directly impacts both patient outcomes and the strength of any associated legal case. Valhalla Health strongly recommends the following standards when selecting providers across all steps of this plan:",
-      protocolSections: [
-        {
-          items: [
-            {
-              title: "Structured, Standardized Documentation",
-              description:
-                "Select providers who utilize structured documentation protocols for all evaluations and treatment sessions, not narrative-only notes.",
-            },
-            {
-              title: "Quantitative Scoring on Validated Instruments",
-              description:
-                "Ensure all providers generate numerical scores on validated tools — these are critical for establishing severity, tracking progress, and supporting expert testimony.",
-            },
-            {
-              title: "Regular Progress Documentation",
-              description:
-                "Require documentation at defined intervals throughout the treatment course to demonstrate treatment response and functional change over time.",
-            },
-            {
-              title: "Legally Defensible Reporting Capability",
-              description:
-                "Confirm that providers can produce comprehensive, structured reports suitable for expert review and use in legal proceedings.",
-            },
-            {
-              title: "Documented TBI Clinical Experience",
-              description:
-                "Where possible, engage providers with specific TBI clinical experience and verifiable patient outcome data, general practitioners are insufficient for complex TBI cases.",
-            },
-          ],
-        },
-      ],
-      protocolNote:
-        "Valhalla Health’s Neuro Sentinel network can connect your firm with credentialed providers meeting these documentation standards nationwide. Contact your Valhalla Health representative for a provider referral in your region.",
-    },
   ],
   footer: {
     title: "DISCLAIMER",

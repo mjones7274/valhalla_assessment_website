@@ -220,6 +220,15 @@ const sanitizePdfFilename = (value, fallback = "signature_agreement") => {
   return normalized || fallback;
 };
 
+const createSafeGuidPdfFilename = () => {
+  const cryptoUuid =
+    typeof window !== "undefined" ? window.crypto?.randomUUID?.() : undefined;
+  const fallbackUuid = `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  const safeUuid = sanitizePdfFilename(cryptoUuid || fallbackUuid, "signature_agreement");
+
+  return `${safeUuid}.pdf`;
+};
+
 const getPresignedUploadErrorMessage = (error, label = "Document upload") => {
   const message = String(error?.message || "");
   if (error instanceof TypeError || /Failed to fetch/i.test(message)) {
@@ -261,11 +270,59 @@ const getEmailRequestErrorMessage = async (response) => {
   }
 };
 
+const escapeEmailHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const buildSignatureAgreementEmailHtml = ({ firstName }) => {
+  const safeFirstName = escapeEmailHtml(String(firstName ?? "").trim() || "there");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0; padding:0; background-color:#f4f7fb; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f7fb; margin:0; padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 18px rgba(15, 23, 42, 0.08);">
+            <tr>
+              <td style="background-color:#0f172a; padding:28px 36px; text-align:center;">
+                <h1 style="margin:0; font-size:24px; line-height:1.3; color:#ffffff; font-weight:700;">
+                  Your Valhalla Health Service Agreement
+                </h1>
+                <p style="margin:10px 0 0; font-size:14px; color:#cbd5e1;">
+                  Confirmed Copy Enclosed
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:36px;">
+                <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">Hi ${safeFirstName},</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Thank you for completing your documentation with Valhalla Health. Attached to this email is your signed Valhalla Health Service Agreement for your records.</p>
+                <div style="margin:0 0 24px; padding:20px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
+                  <p style="margin:0; font-size:16px; line-height:1.7; color:#334155;">This agreement confirms the arrangement under which Valhalla Health will provide services in connection with your personal injury case and outlines how payment for those services is secured through your settlement proceeds. You are not personally responsible for any balance; your lien is non-recourse and tied solely to the outcome of your case.</p>
+                </div>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Please retain this document if you have not done so already. If you have any questions about the agreement or your account, do not hesitate to reach out to us directly.</p>
+                <p style="margin:28px 0 0; font-size:16px; line-height:1.7;">Warm regards,<br /><strong>Valhalla Health</strong></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+};
+
 const sendSignatureAgreementEmail = async ({
   requestFn,
   recipientEmail,
   downloadUrl,
   fileName,
+  firstName,
 }) => {
   const trimmedRecipientEmail = String(recipientEmail ?? "").trim();
   const trimmedDownloadUrl = String(downloadUrl ?? "").trim();
@@ -277,8 +334,8 @@ const sendSignatureAgreementEmail = async ({
 
   const payload = {
     to_addresses: [trimmedRecipientEmail],
-    subject: "Client Assessment Lein Agreement",
-    body_text: "Attached is the PDF report.",
+    subject: "Your Valhalla Health Service Agreement - Confirmed Copy Enclosed",
+    body_html: buildSignatureAgreementEmailHtml({ firstName }),
     attachments: [{
       download_url: trimmedDownloadUrl,
       file_name: trimmedFileName,
@@ -1366,16 +1423,7 @@ const AgreementSignatureField = ({
         const resolvedPatientId = Number(patientId) || 1002;
         const resolvedCompanyId = Number(companyId) || 1000;
         const resolvedAttemptId = Number(assessmentAttemptId) || 46;
-        const fallbackFirstName =
-          String(patientData?.first_name ?? patientData?.firstName ?? "Mike").trim() || "Mike";
-        const fallbackLastName =
-          String(patientData?.last_name ?? patientData?.lastName ?? "Jones").trim() || "Jones";
-        const documentNameForUpload = [
-          "valhalla_lien_and_data_authorization",
-          sanitizePdfFilename(fallbackFirstName, "Mike"),
-          sanitizePdfFilename(fallbackLastName, "Jones"),
-          dateText.replace(/\//g, "-"),
-        ].join("_") + ".pdf";
+        const documentNameForUpload = createSafeGuidPdfFilename();
 
         const documentLinkRes = await uploadRequestFn(DOCUMENT_UPLOAD_GET_LINK_API, {
           method: "POST",
@@ -1445,6 +1493,7 @@ const AgreementSignatureField = ({
             recipientEmail: emailRecipient,
             downloadUrl: downloadUrl || documentUrl,
             fileName: documentNameForUpload,
+            firstName: patientData?.first_name,
           });
           agreementSent = true;
         } catch (error) {

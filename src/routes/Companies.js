@@ -13,6 +13,10 @@ const PERSON_TYPES_API = `${API_BASE}/api/person-types/`;
 const COMPANY_LOGO_UPLOAD_API = `${API_BASE}/api/uploads/company-logo`;
 const COMPANY_LOGO_API_BASE = `${API_BASE}/api/company/logo/`;
 const API_DEBUG_API = `${API_BASE}/api/api-debug/`;
+const INTEGRATION_TYPES_API = `${API_BASE}/api/integration-types/`;
+const INTEGRATION_TYPE_TESTS_API = `${API_BASE}/api/integration-type-tests/`;
+const COMPANY_PATIENTS_VIEW_API = `${API_BASE}/api/company-patients-view/`;
+const FILEVINE_INTEGRATION_TEST_API_BASE = `${API_BASE}/api/integrations/filevine/`;
 
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
@@ -183,6 +187,106 @@ const getCompanyTypeDescription = (company) => {
     company?.company_type_description ??
     "—"
   );
+};
+
+const getIntegrationTypeOptionValue = (integrationType) => {
+  return String(
+    integrationType?.integration_type_id ??
+    integrationType?.company_integration_type_id ??
+    integrationType?.id ??
+    integrationType?.value ??
+    ""
+  );
+};
+
+const getIntegrationTypeOptionLabel = (integrationType) => {
+  return String(
+    integrationType?.description ??
+    integrationType?.integration_type_description ??
+    integrationType?.integration_type ??
+    integrationType?.name ??
+    integrationType?.label ??
+    getIntegrationTypeOptionValue(integrationType) ??
+    "—"
+  );
+};
+
+const getPatientOptionLabel = (patient) => {
+  const firstName = String(patient?.first_name || "").trim();
+  const lastName = String(patient?.last_name || "").trim();
+  const patientName = `${firstName} ${lastName}`.trim() || "Unknown Patient";
+  const patientId = patient?.patient_id ?? "—";
+
+  return `${patientName} (${patientId})`;
+};
+
+const getPatientRootFolder = (patientRecord) => {
+  const rootFolder = patientRecord?.company_payload?.root_folder;
+  return rootFolder === null || rootFolder === undefined ? "" : String(rootFolder);
+};
+
+const getIntegrationTypeTestOptionValue = (integrationTypeTest) => {
+  return String(
+    integrationTypeTest?.integration_type_test_id ??
+    integrationTypeTest?.id ??
+    integrationTypeTest?.value ??
+    ""
+  );
+};
+
+const getIntegrationTypeTestOptionLabel = (integrationTypeTest) => {
+  return String(
+    integrationTypeTest?.description ??
+    integrationTypeTest?.name ??
+    integrationTypeTest?.label ??
+    getIntegrationTypeTestOptionValue(integrationTypeTest) ??
+    "—"
+  );
+};
+
+const dedupeCompanyPatients = (rows) => {
+  if (!Array.isArray(rows)) return [];
+
+  const patientsById = new Map();
+  rows.forEach((row, index) => {
+    const patientId = row?.patient_id;
+    const mapKey = patientId === null || patientId === undefined || patientId === ""
+      ? `row-${index}`
+      : String(patientId);
+
+    if (!patientsById.has(mapKey)) {
+      patientsById.set(mapKey, row);
+    }
+  });
+
+  return Array.from(patientsById.values());
+};
+
+const normalizeApiDebugPayload = (payload, requestedPage = 1) => {
+  if (Array.isArray(payload)) {
+    return {
+      rows: payload,
+      currentPage: requestedPage,
+      totalPages: 1,
+    };
+  }
+
+  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  const count = Number(payload?.count ?? rows.length) || rows.length;
+  const pageSize = rows.length > 0 ? rows.length : Number(payload?.page_size ?? 0) || 0;
+  const currentPage = Number(payload?.current_page ?? payload?.page ?? requestedPage) || requestedPage;
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(count / pageSize)) : 1;
+
+  return {
+    rows,
+    currentPage,
+    totalPages,
+  };
+};
+
+const toIntegrationTestNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
 };
 
 const Companies = () => {
@@ -396,6 +500,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   const [companyTypes, setCompanyTypes] = useState([]);
   const [companyPeople, setCompanyPeople] = useState([]);
   const [peopleLoading, setPeopleLoading] = useState(false);
+  const [isPeopleCardExpanded, setIsPeopleCardExpanded] = useState(false);
   const [showPersonModal, setShowPersonModal] = useState(false);
   const [showApiDebugModal, setShowApiDebugModal] = useState(false);
   const [apiDebugRows, setApiDebugRows] = useState([]);
@@ -403,7 +508,25 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   const [apiDebugSortDirection, setApiDebugSortDirection] = useState("desc");
   const [apiDebugLoading, setApiDebugLoading] = useState(false);
   const [apiDebugError, setApiDebugError] = useState("");
+  const [apiDebugCurrentPage, setApiDebugCurrentPage] = useState(1);
+  const [apiDebugTotalPages, setApiDebugTotalPages] = useState(1);
   const [selectedApiDebugRow, setSelectedApiDebugRow] = useState(null);
+  const [showReportUploadTestModal, setShowReportUploadTestModal] = useState(false);
+  const [reportUploadLoading, setReportUploadLoading] = useState(false);
+  const [reportUploadError, setReportUploadError] = useState("");
+  const [reportUploadIntegrationTypes, setReportUploadIntegrationTypes] = useState([]);
+  const [selectedReportUploadIntegrationType, setSelectedReportUploadIntegrationType] = useState("");
+  const [reportUploadIntegrationTests, setReportUploadIntegrationTests] = useState([]);
+  const [selectedReportUploadIntegrationTestId, setSelectedReportUploadIntegrationTestId] = useState("");
+  const [reportUploadIntegrationTestsLoading, setReportUploadIntegrationTestsLoading] = useState(false);
+  const [reportUploadPatients, setReportUploadPatients] = useState([]);
+  const [selectedReportUploadPatientId, setSelectedReportUploadPatientId] = useState("");
+  const [documentFolderId, setDocumentFolderId] = useState("");
+  const [documentFolderLoading, setDocumentFolderLoading] = useState(false);
+  const [reportUploadProjectId, setReportUploadProjectId] = useState("");
+  const [reportUploadPreviewJson, setReportUploadPreviewJson] = useState("");
+  const [showReportUploadPreviewDialog, setShowReportUploadPreviewDialog] = useState(false);
+  const [reportUploadSubmitting, setReportUploadSubmitting] = useState(false);
   const [removingLinkId, setRemovingLinkId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -423,6 +546,27 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       setPendingLogoFile(null);
       setLogoLoadFailed(false);
       setSaveError("");
+      setIsPeopleCardExpanded(false);
+      setShowApiDebugModal(false);
+      setApiDebugRows([]);
+      setApiDebugCurrentPage(1);
+      setApiDebugTotalPages(1);
+      setSelectedApiDebugRow(null);
+      setShowReportUploadTestModal(false);
+      setReportUploadError("");
+      setReportUploadIntegrationTypes([]);
+      setSelectedReportUploadIntegrationType("");
+      setReportUploadIntegrationTests([]);
+      setSelectedReportUploadIntegrationTestId("");
+      setReportUploadIntegrationTestsLoading(false);
+      setReportUploadPatients([]);
+      setSelectedReportUploadPatientId("");
+      setDocumentFolderId("");
+      setDocumentFolderLoading(false);
+      setReportUploadProjectId("");
+      setReportUploadPreviewJson("");
+      setShowReportUploadPreviewDialog(false);
+      setReportUploadSubmitting(false);
     }
   }, [company]);
 
@@ -691,6 +835,24 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     });
   }, [apiDebugRows, apiDebugSortField, apiDebugSortDirection]);
 
+  const apiDebugVisiblePages = useMemo(() => {
+    if (apiDebugTotalPages <= 1) return [];
+
+    const windowSize = 5;
+    const halfWindow = Math.floor(windowSize / 2);
+    let startPage = Math.max(1, apiDebugCurrentPage - halfWindow);
+    let endPage = Math.min(apiDebugTotalPages, startPage + windowSize - 1);
+
+    startPage = Math.max(1, endPage - windowSize + 1);
+
+    return Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage + index);
+  }, [apiDebugCurrentPage, apiDebugTotalPages]);
+
+  const apiDebugSkeletonRows = useMemo(
+    () => Array.from({ length: 6 }, (_, index) => ({ id: `api-debug-skeleton-${index}` })),
+    []
+  );
+
   const toggleApiDebugSort = (field) => {
     if (apiDebugSortField === field) {
       setApiDebugSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -706,7 +868,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     return `${label} ${apiDebugSortDirection === "asc" ? "▲" : "▼"}`;
   };
 
-  const loadApiDebugRows = useCallback(async ({ openModal = false } = {}) => {
+  const loadApiDebugRows = useCallback(async ({ openModal = false, page = 1 } = {}) => {
     if (!company?.company_id) return;
 
     if (openModal) {
@@ -718,21 +880,189 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setApiDebugError("");
 
     try {
-      const response = await apiRequest(`${API_DEBUG_API}?company_id=${company.company_id}`);
+      const response = await apiRequest(
+        `${API_DEBUG_API}?company_id=${encodeURIComponent(company.company_id)}&page=${encodeURIComponent(page)}`
+      );
       if (!response.ok) {
         throw new Error(`API debug request failed with status ${response.status}`);
       }
 
       const payload = await response.json();
-      setApiDebugRows(Array.isArray(payload) ? payload : []);
+      const normalizedPayload = normalizeApiDebugPayload(payload, page);
+      setApiDebugRows(normalizedPayload.rows);
+      setApiDebugCurrentPage(normalizedPayload.currentPage);
+      setApiDebugTotalPages(normalizedPayload.totalPages);
     } catch (error) {
       console.error("Failed to load API debug rows", error);
       setApiDebugRows([]);
+      setApiDebugCurrentPage(1);
+      setApiDebugTotalPages(1);
       setApiDebugError(error?.message || "Failed to load API debug data.");
     } finally {
       setApiDebugLoading(false);
     }
   }, [company?.company_id]);
+
+  const loadReportUploadTestData = useCallback(async ({ openModal = false } = {}) => {
+    if (!company?.company_id) return;
+
+    if (openModal) {
+      setShowReportUploadTestModal(true);
+    }
+
+    setReportUploadLoading(true);
+    setReportUploadError("");
+    setReportUploadIntegrationTests([]);
+    setSelectedReportUploadIntegrationTestId("");
+    setReportUploadIntegrationTestsLoading(false);
+    setSelectedReportUploadPatientId("");
+    setDocumentFolderId("");
+    setReportUploadProjectId("");
+    setReportUploadPreviewJson("");
+    setShowReportUploadPreviewDialog(false);
+    setReportUploadSubmitting(false);
+
+    try {
+      const [integrationTypesResponse, patientsResponse] = await Promise.all([
+        apiRequest(INTEGRATION_TYPES_API),
+        apiRequest(`${COMPANY_PATIENTS_VIEW_API}?company_id=${encodeURIComponent(company.company_id)}`),
+      ]);
+
+      if (!integrationTypesResponse.ok) {
+        throw new Error(
+          await readErrorMessage(
+            integrationTypesResponse,
+            `Integration types request failed with status ${integrationTypesResponse.status}`
+          )
+        );
+      }
+
+      if (!patientsResponse.ok) {
+        throw new Error(
+          await readErrorMessage(
+            patientsResponse,
+            `Company patients request failed with status ${patientsResponse.status}`
+          )
+        );
+      }
+
+      const [integrationTypesPayload, patientsPayload] = await Promise.all([
+        integrationTypesResponse.json(),
+        patientsResponse.json(),
+      ]);
+
+      setReportUploadIntegrationTypes(
+        Array.isArray(integrationTypesPayload) ? integrationTypesPayload : []
+      );
+      setReportUploadPatients(dedupeCompanyPatients(patientsPayload));
+    } catch (error) {
+      console.error("Failed to load report upload test data", error);
+      setReportUploadIntegrationTypes([]);
+      setReportUploadPatients([]);
+      setReportUploadError(error?.message || "Failed to load report upload test data.");
+    } finally {
+      setReportUploadLoading(false);
+    }
+  }, [company?.company_id]);
+
+  const handleReportUploadIntegrationTypeChange = useCallback(async (event) => {
+    const integrationTypeId = event.target.value;
+
+    setSelectedReportUploadIntegrationType(integrationTypeId);
+    setReportUploadIntegrationTests([]);
+    setSelectedReportUploadIntegrationTestId("");
+    setSelectedReportUploadPatientId("");
+    setDocumentFolderId("");
+    setDocumentFolderLoading(false);
+    setReportUploadProjectId("");
+    setReportUploadPreviewJson("");
+    setShowReportUploadPreviewDialog(false);
+    setReportUploadSubmitting(false);
+    setReportUploadError("");
+
+    if (!integrationTypeId) {
+      setReportUploadIntegrationTestsLoading(false);
+      return;
+    }
+
+    setReportUploadIntegrationTestsLoading(true);
+
+    try {
+      const response = await apiRequest(
+        `${INTEGRATION_TYPE_TESTS_API}?integration_type_id=${encodeURIComponent(integrationTypeId)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(
+            response,
+            `Integration test types request failed with status ${response.status}`
+          )
+        );
+      }
+
+      const payload = await response.json();
+      setReportUploadIntegrationTests(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      console.error("Failed to load integration test types", error);
+      setReportUploadIntegrationTests([]);
+      setReportUploadError(error?.message || "Failed to load integration test types.");
+    } finally {
+      setReportUploadIntegrationTestsLoading(false);
+    }
+  }, []);
+
+  const handleReportUploadIntegrationTestChange = useCallback((event) => {
+    const integrationTestId = event.target.value;
+
+    setSelectedReportUploadIntegrationTestId(integrationTestId);
+    setSelectedReportUploadPatientId("");
+    setDocumentFolderId("");
+    setDocumentFolderLoading(false);
+    setReportUploadProjectId("");
+    setReportUploadPreviewJson("");
+    setShowReportUploadPreviewDialog(false);
+    setReportUploadSubmitting(false);
+    setReportUploadError("");
+  }, []);
+
+  const handleReportUploadPatientChange = useCallback(async (event) => {
+    const patientId = event.target.value;
+    setSelectedReportUploadPatientId(patientId);
+    setDocumentFolderId("");
+    setReportUploadError("");
+
+    if (!patientId) {
+      return;
+    }
+
+    setDocumentFolderLoading(true);
+
+    try {
+      const response = await apiRequest(
+        `${COMPANY_PATIENTS_VIEW_API}?patient_id=${encodeURIComponent(patientId)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(
+            response,
+            `Patient details request failed with status ${response.status}`
+          )
+        );
+      }
+
+      const payload = await response.json();
+      const selectedPatientRecord = Array.isArray(payload) ? payload[0] : payload;
+      setDocumentFolderId(getPatientRootFolder(selectedPatientRecord));
+    } catch (error) {
+      console.error("Failed to load patient folder", error);
+      setDocumentFolderId("");
+      setReportUploadError(error?.message || "Failed to load the selected patient.");
+    } finally {
+      setDocumentFolderLoading(false);
+    }
+  }, []);
 
   if (!company) return null;
 
@@ -741,8 +1071,92 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   };
 
   const handleRefreshApiDebugRows = () => {
-    loadApiDebugRows();
+    loadApiDebugRows({ page: apiDebugCurrentPage });
   };
+
+  const handleApiDebugPageChange = (page) => {
+    if (apiDebugLoading) return;
+    if (page === apiDebugCurrentPage) return;
+    if (page < 1 || page > apiDebugTotalPages) return;
+
+    loadApiDebugRows({ page });
+  };
+
+  const handleOpenReportUploadTestModal = () => {
+    loadReportUploadTestData({ openModal: true });
+  };
+
+  const handleRunReportUploadTest = async () => {
+    if (!isProjectDataDownloadIntegrationTest) {
+      return;
+    }
+
+    const projectPayload = {
+      debug_test: true,
+      Event: "Created",
+      OrgId: 8759,
+      Other: {
+        PhaseId: 192817,
+        ProjectTypeId: 31878,
+      },
+      Object: "Project",
+      UserId: 88460,
+      ObjectId: {
+        ProjectId: toIntegrationTestNumber(reportUploadProjectId),
+      },
+      UserType: "ServiceAccount",
+      ProjectId: toIntegrationTestNumber(reportUploadProjectId),
+      Timestamp: Date.now(),
+    };
+
+    setReportUploadError("");
+    setReportUploadSubmitting(true);
+
+    try {
+      const response = await apiRequest(
+        `${FILEVINE_INTEGRATION_TEST_API_BASE}${encodeURIComponent(company.company_id)}/`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(projectPayload),
+        }
+      );
+
+      const contentType = response.headers.get("content-type") || "";
+      let responsePayload;
+
+      if (contentType.includes("application/json")) {
+        responsePayload = await response.json().catch(() => null);
+      } else {
+        responsePayload = await response.text().catch(() => "");
+      }
+
+      const formattedResponse = typeof responsePayload === "string"
+        ? responsePayload || `Request completed with status ${response.status}.`
+        : JSON.stringify(responsePayload ?? {
+            status: response.status,
+            ok: response.ok,
+          }, null, 2);
+
+      setReportUploadPreviewJson(formattedResponse);
+      setShowReportUploadPreviewDialog(true);
+
+      if (!response.ok) {
+        setReportUploadError(`Integration test request failed with status ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Failed to run integration test", error);
+      const errorMessage = error?.message || "Failed to run integration test.";
+      setReportUploadError(errorMessage);
+      setReportUploadPreviewJson(errorMessage);
+      setShowReportUploadPreviewDialog(true);
+    } finally {
+      setReportUploadSubmitting(false);
+    }
+  };
+
+  const isDocumentUploadIntegrationTest = Number(selectedReportUploadIntegrationTestId) === 1;
+  const isProjectDataDownloadIntegrationTest = Number(selectedReportUploadIntegrationTestId) === 2;
 
   return (
     <div className="modal-overlay">
@@ -859,46 +1273,58 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
             </div>
 
             <div className="company-data-card">
-              <div className="company-data-card-header">People</div>
-              <div className="company-data-card-body">
-                {peopleLoading ? (
-                  <div className="people-empty">Loading people...</div>
-                ) : companyPeople.length === 0 ? (
-                  <div className="people-empty">No people associated with this company.</div>
-                ) : (
-                  <div className="people-list">
-                    {companyPeople.map((cp) => (
-                      <div className="people-row" key={`${cp.person_id}-${cp.company_person_id ?? "temp"}`}>
-                        <div>
-                          <div className="people-name">{getPersonDisplayName(cp)}</div>
-                          <div className="people-type">{cp.person_type_description}</div>
+              <button
+                type="button"
+                className="company-data-card-header company-data-card-toggle"
+                aria-expanded={isPeopleCardExpanded}
+                onClick={() => setIsPeopleCardExpanded((prev) => !prev)}
+              >
+                <span>People</span>
+                <span className="company-data-card-toggle-icon" aria-hidden="true">
+                  {isPeopleCardExpanded ? "▾" : "▸"}
+                </span>
+              </button>
+              {isPeopleCardExpanded && (
+                <div className="company-data-card-body">
+                  {peopleLoading ? (
+                    <div className="people-empty">Loading people...</div>
+                  ) : companyPeople.length === 0 ? (
+                    <div className="people-empty">No people associated with this company.</div>
+                  ) : (
+                    <div className="people-list">
+                      {companyPeople.map((cp) => (
+                        <div className="people-row" key={`${cp.person_id}-${cp.company_person_id ?? "temp"}`}>
+                          <div>
+                            <div className="people-name">{getPersonDisplayName(cp)}</div>
+                            <div className="people-type">{cp.person_type_description}</div>
+                          </div>
+                          {isEdit && (
+                            <button
+                              type="button"
+                              className="icon-remove"
+                              title="Remove person"
+                              disabled={removingLinkId === cp.company_person_id || !cp.company_person_id}
+                              onClick={() => handleRemovePerson(cp.company_person_id)}
+                            >
+                              ✕
+                            </button>
+                          )}
                         </div>
-                        {isEdit && (
-                          <button
-                            type="button"
-                            className="icon-remove"
-                            title="Remove person"
-                            disabled={removingLinkId === cp.company_person_id || !cp.company_person_id}
-                            onClick={() => handleRemovePerson(cp.company_person_id)}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
 
-                {isEdit && (
-                  <button
-                    className="company-add-btn"
-                    type="button"
-                    onClick={() => setShowPersonModal(true)}
-                  >
-                    + Add Person
-                  </button>
-                )}
-              </div>
+                  {isEdit && (
+                    <button
+                      className="company-add-btn"
+                      type="button"
+                      onClick={() => setShowPersonModal(true)}
+                    >
+                      + Add Person
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {isCorporateAdmin && (
@@ -947,6 +1373,14 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                     onClick={handleOpenApiDebugModal}
                   >
                     Show API Debug Details
+                  </button>
+
+                  <button
+                    type="button"
+                    className="integration-link-btn"
+                    onClick={handleOpenReportUploadTestModal}
+                  >
+                    Integration Test
                   </button>
                 </div>
               </div>
@@ -1048,55 +1482,130 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                 </div>
               </div>
 
-              {apiDebugLoading ? (
-                <div className="people-empty">Loading debug data...</div>
-              ) : apiDebugError ? (
+              {apiDebugError ? (
                 <div className="api-debug-error">{apiDebugError}</div>
-              ) : apiDebugRows.length === 0 ? (
+              ) : !apiDebugLoading && apiDebugRows.length === 0 ? (
                 <div className="people-empty">No debug rows found for this company.</div>
               ) : (
-                <div className="api-debug-table-wrap">
-                  <table className="api-debug-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th onClick={() => toggleApiDebugSort("timestamp")}>
-                          {getApiDebugSortLabel("timestamp", "Timestamp")}
-                        </th>
-                        <th>Source IP</th>
-                        <th onClick={() => toggleApiDebugSort("status")}>
-                          {getApiDebugSortLabel("status", "Status")}
-                        </th>
-                        <th>API Key</th>
-                        <th>Headers</th>
-                        <th>Body</th>
-                        <th>Error</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedApiDebugRows.map((row) => (
-                        <tr
-                          key={row.api_debug_id}
-                          className="api-debug-row"
-                          onClick={() => setSelectedApiDebugRow(row)}
-                        >
-                          <td>{row.api_debug_id}</td>
-                          <td>{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</td>
-                          <td className="api-debug-truncate">{formatApiDebugCellValue(row.source_ip)}</td>
-                          <td>
-                            <span className={`status-pill ${row.is_successful ? "active" : "inactive"}`}>
-                              {row.is_successful ? "Successful" : "Failed"}
-                            </span>
-                          </td>
-                          <td className="api-debug-truncate">{formatApiDebugCellValue(row.api_key)}</td>
-                          <td className="api-debug-truncate">{formatApiDebugCellValue(row.headers)}</td>
-                          <td className="api-debug-truncate">{formatApiDebugCellValue(row.body)}</td>
-                          <td className="api-debug-truncate">{formatApiDebugCellValue(row.error_text)}</td>
+                <>
+                  {apiDebugTotalPages > 1 && (
+                    <div className="api-debug-pagination" role="navigation" aria-label="API debug pages">
+                      <button
+                        type="button"
+                        className="api-debug-page-btn api-debug-nav-btn"
+                        onClick={() => handleApiDebugPageChange(1)}
+                        disabled={apiDebugLoading || apiDebugCurrentPage <= 1}
+                        aria-label="First page"
+                      >
+                        «
+                      </button>
+
+                      <button
+                        type="button"
+                        className="api-debug-page-btn api-debug-nav-btn"
+                        onClick={() => handleApiDebugPageChange(apiDebugCurrentPage - 1)}
+                        disabled={apiDebugLoading || apiDebugCurrentPage <= 1}
+                        aria-label="Previous page"
+                      >
+                        ←
+                      </button>
+
+                      <div className="api-debug-page-status">
+                        Page {apiDebugCurrentPage} of {apiDebugTotalPages}
+                      </div>
+
+                      <div className="api-debug-page-window">
+                        {apiDebugVisiblePages.map((pageNumber) => (
+                          <button
+                            key={pageNumber}
+                            type="button"
+                            className={`api-debug-page-btn ${pageNumber === apiDebugCurrentPage ? "active" : ""}`}
+                            onClick={() => handleApiDebugPageChange(pageNumber)}
+                            disabled={apiDebugLoading}
+                          >
+                            {pageNumber}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="api-debug-page-btn api-debug-nav-btn"
+                        onClick={() => handleApiDebugPageChange(apiDebugCurrentPage + 1)}
+                        disabled={apiDebugLoading || apiDebugCurrentPage >= apiDebugTotalPages}
+                        aria-label="Next page"
+                      >
+                        →
+                      </button>
+
+                      <button
+                        type="button"
+                        className="api-debug-page-btn api-debug-nav-btn"
+                        onClick={() => handleApiDebugPageChange(apiDebugTotalPages)}
+                        disabled={apiDebugLoading || apiDebugCurrentPage >= apiDebugTotalPages}
+                        aria-label="Last page"
+                      >
+                        »
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="api-debug-table-wrap">
+                    <table className="api-debug-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th onClick={() => toggleApiDebugSort("timestamp")}>
+                            {getApiDebugSortLabel("timestamp", "Timestamp")}
+                          </th>
+                          <th>Source IP</th>
+                          <th onClick={() => toggleApiDebugSort("status")}>
+                            {getApiDebugSortLabel("status", "Status")}
+                          </th>
+                          <th>API Key</th>
+                          <th>Headers</th>
+                          <th>Body</th>
+                          <th>Error</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {apiDebugLoading
+                          ? apiDebugSkeletonRows.map((row) => (
+                              <tr key={row.id} className="api-debug-skeleton-row" aria-hidden="true">
+                                <td><div className="api-debug-skeleton api-debug-skeleton-id" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-timestamp" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-short" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-status" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-medium" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-long" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-long" /></td>
+                                <td><div className="api-debug-skeleton api-debug-skeleton-medium" /></td>
+                              </tr>
+                            ))
+                          : sortedApiDebugRows.map((row) => (
+                              <tr
+                                key={row.api_debug_id}
+                                className="api-debug-row"
+                                onClick={() => setSelectedApiDebugRow(row)}
+                              >
+                                <td>{row.api_debug_id}</td>
+                                <td>{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</td>
+                                <td className="api-debug-truncate">{formatApiDebugCellValue(row.source_ip)}</td>
+                                <td>
+                                  <span className={`status-pill ${row.is_successful ? "active" : "inactive"}`}>
+                                    {row.is_successful ? "Successful" : "Failed"}
+                                  </span>
+                                </td>
+                                <td className="api-debug-truncate">{formatApiDebugCellValue(row.api_key)}</td>
+                                <td className="api-debug-truncate">{formatApiDebugCellValue(row.headers)}</td>
+                                <td className="api-debug-truncate">{formatApiDebugCellValue(row.body)}</td>
+                                <td className="api-debug-truncate">{formatApiDebugCellValue(row.error_text)}</td>
+                              </tr>
+                            ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
 
               <div className="modal-actions">
@@ -1124,7 +1633,6 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                     {selectedApiDebugRow.is_successful ? "Successful" : "Failed"}
                   </span>
                 </Detail>
-                <Detail label="API Key">{formatApiDebugCellValue(selectedApiDebugRow.api_key)}</Detail>
               </div>
 
               <div className="api-debug-json-block">
@@ -1144,6 +1652,156 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
               <div className="modal-actions">
                 <button onClick={() => setSelectedApiDebugRow(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showReportUploadTestModal && (
+          <div className="modal-overlay" style={{ zIndex: 1400 }}>
+            <div className="modal modern api-debug-details-modal report-upload-test-modal">
+              <div className="modal-header">
+                <h3>INTEGRATION TEST</h3>
+                <button className="icon-close" onClick={() => setShowReportUploadTestModal(false)}>✕</button>
+              </div>
+
+              {reportUploadLoading ? (
+                <div className="people-empty">Loading report upload test data...</div>
+              ) : (
+                <>
+                  {reportUploadError && <div className="api-debug-error">{reportUploadError}</div>}
+
+                  <div className="report-upload-test-form">
+                    <Detail label="Company Integration Type">
+                      <select
+                        value={selectedReportUploadIntegrationType}
+                        onChange={handleReportUploadIntegrationTypeChange}
+                      >
+                        <option value="">Select an integration type</option>
+                        {reportUploadIntegrationTypes.map((integrationType, index) => {
+                          const optionValue = getIntegrationTypeOptionValue(integrationType);
+                          const optionKey = optionValue || `integration-type-${index}`;
+
+                          return (
+                            <option key={optionKey} value={optionValue}>
+                              {getIntegrationTypeOptionLabel(integrationType)}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </Detail>
+
+                    <Detail label="Integration Test Type">
+                      <select
+                        value={selectedReportUploadIntegrationTestId}
+                        onChange={handleReportUploadIntegrationTestChange}
+                        disabled={!selectedReportUploadIntegrationType || reportUploadIntegrationTestsLoading}
+                      >
+                        <option value="">
+                          {!selectedReportUploadIntegrationType
+                            ? "Select a company integration type first"
+                            : reportUploadIntegrationTestsLoading
+                              ? "Loading integration test types..."
+                              : reportUploadIntegrationTests.length === 0
+                                ? "No integration test types available"
+                                : "Select an integration test type"}
+                        </option>
+                        {reportUploadIntegrationTests.map((integrationTest, index) => {
+                          const optionValue = getIntegrationTypeTestOptionValue(integrationTest);
+                          const optionKey = optionValue || `integration-test-${index}`;
+
+                          return (
+                            <option key={optionKey} value={optionValue}>
+                              {getIntegrationTypeTestOptionLabel(integrationTest)}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </Detail>
+
+                    {isDocumentUploadIntegrationTest && (
+                      <>
+                        <Detail label="Patient">
+                          <select
+                            value={selectedReportUploadPatientId}
+                            onChange={handleReportUploadPatientChange}
+                          >
+                            <option value="">
+                              {reportUploadPatients.length === 0 ? "No patients available" : "Select a patient"}
+                            </option>
+                            {reportUploadPatients.map((patient, index) => {
+                              const patientValue = String(patient?.patient_id ?? "");
+                              const patientKey = patientValue || `company-patient-${index}`;
+
+                              return (
+                                <option key={patientKey} value={patientValue}>
+                                  {getPatientOptionLabel(patient)}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </Detail>
+
+                        <Detail label="Document Folder ID">
+                          <input
+                            type="text"
+                            value={documentFolderId}
+                            onChange={(event) => setDocumentFolderId(event.target.value)}
+                            placeholder={documentFolderLoading ? "Loading folder ID..." : "Enter document folder ID"}
+                          />
+                        </Detail>
+                      </>
+                    )}
+
+                    {isProjectDataDownloadIntegrationTest && (
+                      <Detail label="Project ID">
+                        <input
+                          type="text"
+                          value={reportUploadProjectId}
+                          onChange={(event) => setReportUploadProjectId(event.target.value)}
+                          placeholder="Enter project ID"
+                        />
+                      </Detail>
+                    )}
+                  </div>
+
+                  {isDocumentUploadIntegrationTest && documentFolderLoading && (
+                    <div className="people-empty report-upload-test-loading">
+                      Loading patient folder...
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleRunReportUploadTest}
+                  disabled={reportUploadSubmitting}
+                >
+                  {reportUploadSubmitting ? "Running..." : "Run Test"}
+                </button>
+                <button onClick={() => setShowReportUploadTestModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showReportUploadPreviewDialog && (
+          <div className="modal-overlay" style={{ zIndex: 1450 }}>
+            <div className="modal modern api-debug-details-modal report-upload-test-modal">
+              <div className="modal-header">
+                <h3>INTEGRATION TEST RESPONSE</h3>
+                <button className="icon-close" onClick={() => setShowReportUploadPreviewDialog(false)}>✕</button>
+              </div>
+
+              <div className="api-debug-json-block" style={{ marginTop: 0 }}>
+                <pre>{reportUploadPreviewJson}</pre>
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowReportUploadPreviewDialog(false)}>OK</button>
               </div>
             </div>
           </div>

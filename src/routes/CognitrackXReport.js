@@ -820,47 +820,6 @@ const reportData = {
       protocolNote:
         "Patients and their treating teams are encouraged to evaluate any adjunctive therapy on the basis of (1) the current published evidence for the specific indication, (2) the credentials and documentation practices of any provider offering the therapy, and (3) coordination with the broader treatment plan.",
     },
-    {
-      step: "STEP 5",
-      title: "Provider Selection & Documentation Standards",
-      icon: FaUserMd,
-      useStepPill: true,
-      introText:
-        "The quality and completeness of clinical documentation directly impacts both patient outcomes and the strength of any associated legal case. Valhalla Health strongly recommends the following standards when selecting providers across all steps of this plan:",
-      protocolSections: [
-        {
-          items: [
-            {
-              title: "Structured, Standardized Documentation",
-              description:
-                "Select providers who utilize structured documentation protocols for all evaluations and treatment sessions, not narrative-only notes.",
-            },
-            {
-              title: "Quantitative Scoring on Validated Instruments",
-              description:
-                "Ensure all providers generate numerical scores on validated tools — these are critical for establishing severity, tracking progress, and supporting expert testimony.",
-            },
-            {
-              title: "Regular Progress Documentation",
-              description:
-                "Require documentation at defined intervals throughout the treatment course to demonstrate treatment response and functional change over time.",
-            },
-            {
-              title: "Legally Defensible Reporting Capability",
-              description:
-                "Confirm that providers can produce comprehensive, structured reports suitable for expert review and use in legal proceedings.",
-            },
-            {
-              title: "Documented TBI Clinical Experience",
-              description:
-                "Where possible, engage providers with specific TBI clinical experience and verifiable patient outcome data, general practitioners are insufficient for complex TBI cases.",
-            },
-          ],
-        },
-      ],
-      protocolNote:
-        "Valhalla Health’s Neuro Sentinel network can connect your firm with credentialed providers meeting these documentation standards nationwide. Contact your Valhalla Health representative for a provider referral in your region.",
-    },
   ],
   footer: {
     title: "DISCLAIMER",
@@ -1566,6 +1525,9 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const selfReportedAocPrimaryResponse = getResponseByQuestionId(assessmentResponses, 22);
   const selfReportedAocSecondaryResponse = getResponseByQuestionId(assessmentResponses, 23);
   const witnessedAocResponse = getResponseByQuestionId(assessmentResponses, 24);
+  const selfReportedPtaPrimaryResponse = getResponseByQuestionId(assessmentResponses, 26);
+  const selfReportedPtaSecondaryResponse = getResponseByQuestionId(assessmentResponses, 27);
+  const witnessedPtaResponse = getResponseByQuestionId(assessmentResponses, 28);
   const storedLocSelfScore = getAttemptMetricValue(reportAttempt, "loc_self_score", "locSelfScore");
   const storedLocWitnessScore = getAttemptMetricValue(reportAttempt, "loc_witness_score", "locWitnessScore");
   const storedAocSelfScore = getAttemptMetricValue(reportAttempt, "aoc_self_score", "aocSelfScore");
@@ -1586,6 +1548,9 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const selfReportedAocPrimaryCalcValue = getResponseCalcValue(selfReportedAocPrimaryResponse);
   const selfReportedAocSecondaryCalcValue = getResponseCalcValue(selfReportedAocSecondaryResponse);
   const witnessedAocCalcValue = getResponseCalcValue(witnessedAocResponse);
+  const selfReportedPtaPrimaryCalcValue = getResponseCalcValue(selfReportedPtaPrimaryResponse);
+  const selfReportedPtaSecondaryCalcValue = getResponseCalcValue(selfReportedPtaSecondaryResponse);
+  const witnessedPtaCalcValue = getResponseCalcValue(witnessedPtaResponse);
   const preInjurySymptomPills = getUniqueTimelinePills(getResponseAnswerValue(baselineResponse));
   const symptomsWithin72HoursPills = getUniqueTimelinePills(getResponseAnswerValue(acuteResponse));
   const persistingSymptomsPills = getUniqueTimelinePills(currentResponseAnswerValue);
@@ -1629,6 +1594,12 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const witnessedAocOptionList = formatOptionList(
     extractReportVerbiageValues(getResponseAnswerValue(witnessedAocResponse))
   );
+  const selfReportedPtaSecondaryOptionList = formatOptionList(
+    extractReportVerbiageValues(getResponseAnswerValue(selfReportedPtaSecondaryResponse))
+  );
+  const witnessedPtaOptionList = formatOptionList(
+    extractReportVerbiageValues(getResponseAnswerValue(witnessedPtaResponse))
+  );
   const selfReportedLocSecondaryDescription = selfReportedLocSecondaryOptionList
     ? `The patient described substantial loss of consciousness, including ${selfReportedLocSecondaryOptionList}. This supports a neurologic disruption consistent with concussion.`
     : "The patient described substantial loss of consciousness. This supports a neurologic disruption consistent with concussion.";
@@ -1639,8 +1610,14 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
     ? `The patient described substantial loss of consciousness, including being ${selfReportedAocSecondaryOptionList}. This supports a neurologic disruption consistent with concussion.`
     : "The patient described substantial loss of consciousness. This supports a neurologic disruption consistent with concussion.";
   const witnessedAocDescription = witnessedAocOptionList
-    ? `Witness accounts included subtle indicators of possible unconsciousness, such as ${witnessedAocOptionList}, but no definitive loss of awareness was observed.`
-    : "Witness accounts included subtle indicators of possible unconsciousness, but no definitive loss of awareness was observed.";
+    ? `Witness accounts included indicators of possible unconsciousness or alteration of consciousness, including ${witnessedAocOptionList}.`
+    : "Witness accounts included indicators of possible unconsciousness or alteration of consciousness.";
+  const selfReportedPtaDescription = selfReportedPtaSecondaryOptionList
+    ? `The patient reported substantial memory disruption, including ${selfReportedPtaSecondaryOptionList}. These findings are consistent with post-traumatic amnesia following injury.`
+    : "The patient reported substantial memory loss, including inability to recall key parts of the incident, persistent memory disruption, or retrograde amnesia. These findings are consistent with traumatic brain injury.";
+  const witnessedPtaDescription = witnessedPtaOptionList
+    ? `Witness accounts included memory-related disruption, such as ${witnessedPtaOptionList}, around the time of injury. These observations support concern for post-traumatic amnesia.`
+    : "Witness accounts described memory-related disruption around the time of injury, which supports concern for post-traumatic amnesia.";
   const resolvedLocConcernScore =
     storedLocSelfScore !== null || storedLocWitnessScore !== null
       ? (storedLocSelfScore ?? 0) + (storedLocWitnessScore ?? 0)
@@ -1652,19 +1629,19 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const resolvedPtaConcernScore =
     storedPtaSelfScore !== null || storedPtaWitnessScore !== null
       ? (storedPtaSelfScore ?? 0) + (storedPtaWitnessScore ?? 0)
-      : 0;
+      : selfReportedPtaPrimaryCalcValue + selfReportedPtaSecondaryCalcValue + witnessedPtaCalcValue;
   const resolvedSymptomProgressionScore =
     storedSymptomProgressionScore !== null
       ? storedSymptomProgressionScore
       : currentAboveBaselineTally;
   const highlightAcuteSummaryCard = acuteCalcValue > baselineCalcValue;
   const highlightCurrentSummaryCard = currentCalcValue > baselineCalcValue;
-  const showSelfReportedLocPrimaryCard = selfReportedLocPrimaryCalcValue > 0;
-  const showSelfReportedLocSecondaryCard = !showSelfReportedLocPrimaryCard && selfReportedLocSecondaryCalcValue > 0;
+  const showSelfReportedLocCard = selfReportedLocPrimaryCalcValue > 0 || selfReportedLocSecondaryCalcValue > 0;
   const showWitnessedLocCard = witnessedLocCalcValue > 0;
-  const showSelfReportedAocPrimaryCard = selfReportedAocPrimaryCalcValue > 0;
-  const showSelfReportedAocSecondaryCard = !showSelfReportedAocPrimaryCard && selfReportedAocSecondaryCalcValue > 0;
+  const showSelfReportedAocCard = selfReportedAocPrimaryCalcValue > 0 || selfReportedAocSecondaryCalcValue > 0;
   const showWitnessedAocCard = witnessedAocCalcValue > 0;
+  const showSelfReportedPtaCard = selfReportedPtaPrimaryCalcValue > 0 || selfReportedPtaSecondaryCalcValue > 0;
+  const showWitnessedPtaCard = witnessedPtaCalcValue > 0;
 
   const visibleConcerns = reportData.concerns.filter((concern) => {
     if (concern.label === "LOC") {
@@ -1705,7 +1682,7 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
 
   const resolvedOutline = reportData.outline
     .filter((item) => {
-      if (item.step === "STEP 4" || item.step === "STEP 5") {
+      if (item.step === "STEP 4") {
         return shouldShowProviderSteps;
       }
 
@@ -1737,10 +1714,9 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
   const renderedPlanItems = [
     outlineItemByStep.get("STEP 1"),
     outlineItemByStep.get("STEP 2"),
-    outlineItemByStep.get("STEP 3"),
     shouldShowProviderSteps ? { kind: "timely_action" } : null,
+    outlineItemByStep.get("STEP 3"),
     outlineItemByStep.get("STEP 4"),
-    outlineItemByStep.get("STEP 5"),
   ].filter(Boolean);
 
   const resolvedReportData = {
@@ -1994,18 +1970,14 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
                   <div>LOSS OF CONSCIOUSNESS</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px", marginTop: "10px", marginBottom: "10px" }}>
-                  {showSelfReportedLocPrimaryCard ? (
+                  {showSelfReportedLocCard ? (
                     <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
                       <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED LOSS OF CONSCIOUSNESS</div>
                       <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>
-                        The patient provided strong self-report indicators consistent with a loss of consciousness.
+                        {selfReportedLocPrimaryCalcValue > 0
+                          ? "The patient provided strong self-report indicators consistent with a loss of consciousness."
+                          : selfReportedLocSecondaryDescription}
                       </div>
-                    </div>
-                  ) : null}
-                  {showSelfReportedLocSecondaryCard ? (
-                    <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
-                      <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED LOSS OF CONSCIOUSNESS</div>
-                      <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>{selfReportedLocSecondaryDescription}</div>
                     </div>
                   ) : null}
                   {showWitnessedLocCard ? (
@@ -2023,18 +1995,14 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
                   <div>ALTERATION OF CONSCIOUSNESS</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px", marginTop: "10px", marginBottom: "10px" }}>
-                  {showSelfReportedAocPrimaryCard ? (
+                  {showSelfReportedAocCard ? (
                     <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
                       <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED ALTERATION OF CONSCIOUSNESS</div>
                       <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>
-                        The patient provided strong self-report indicators consistent with a loss of consciousness.
+                        {selfReportedAocPrimaryCalcValue > 0
+                          ? "The patient provided strong self-report indicators consistent with alteration of consciousness following injury."
+                          : selfReportedAocSecondaryDescription}
                       </div>
-                    </div>
-                  ) : null}
-                  {showSelfReportedAocSecondaryCard ? (
-                    <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
-                      <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED ALTERATION OF CONSCIOUSNESS</div>
-                      <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>{selfReportedAocSecondaryDescription}</div>
                     </div>
                   ) : null}
                   {showWitnessedAocCard ? (
@@ -2052,18 +2020,18 @@ export default function CognitrackXReport({ assessmentName = "Assessment", repor
                   <div>POS-TRAMATIC AMNESIA / MEMORY</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px", marginTop: "10px" }}>
-                  <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
-                    <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED MEMORY LOSS</div>
-                    <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>
-                      The patient reported substantial memory loss, including inability to recall key parts of the incident, persistent memory disruption, or retrograde amnesia. These findings are consistent with traumatic brain injury.
+                  {showSelfReportedPtaCard ? (
+                    <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
+                      <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>SELF-REPORTED MEMORY LOSS</div>
+                      <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>{selfReportedPtaDescription}</div>
                     </div>
-                  </div>
-                  <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
-                    <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>WITNESSED MEMORY LOSS</div>
-                    <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>
-                      According to the patient witnesses did not report or relate to them issues with memory at or near the time of accident.
+                  ) : null}
+                  {showWitnessedPtaCard ? (
+                    <div style={{ background: "#121c2e", border: "1px solid #24324e", borderRadius: "10px", padding: "12px" }}>
+                      <div style={{ color: "#f8fbff", fontWeight: 700, fontSize: "0.68rem", marginBottom: "6px" }}>WITNESSED MEMORY LOSS</div>
+                      <div style={{ ...mutedTextStyle, fontSize: "0.68rem", lineHeight: 1.5 }}>{witnessedPtaDescription}</div>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
               </>
             ) : null}
