@@ -17,6 +17,8 @@ const INTEGRATION_TYPES_API = `${API_BASE}/api/integration-types/`;
 const INTEGRATION_TYPE_TESTS_API = `${API_BASE}/api/integration-type-tests/`;
 const COMPANY_PATIENTS_VIEW_API = `${API_BASE}/api/company-patients-view/`;
 const FILEVINE_INTEGRATION_TEST_API_BASE = `${API_BASE}/api/integrations/filevine/`;
+const COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API = `${API_BASE}/api/document-download/get-link/cognitrackx_report/example/`;
+const FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/`;
 
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
@@ -225,6 +227,18 @@ const getPatientRootFolder = (patientRecord) => {
   return rootFolder === null || rootFolder === undefined ? "" : String(rootFolder);
 };
 
+const getPatientCompanyProjectId = (patientRecord) => {
+  const projectId =
+    patientRecord?.company_project_id ??
+    patientRecord?.project_id ??
+    patientRecord?.company_payload?.project_id ??
+    patientRecord?.company_payload?.company_project_id ??
+    patientRecord?.company?.project_id ??
+    patientRecord?.company?.company_project_id;
+
+  return projectId === null || projectId === undefined ? "" : String(projectId).trim();
+};
+
 const getIntegrationTypeTestOptionValue = (integrationTypeTest) => {
   return String(
     integrationTypeTest?.integration_type_test_id ??
@@ -282,11 +296,6 @@ const normalizeApiDebugPayload = (payload, requestedPage = 1) => {
     currentPage,
     totalPages,
   };
-};
-
-const toIntegrationTestNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : value;
 };
 
 const Companies = () => {
@@ -523,7 +532,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   const [selectedReportUploadPatientId, setSelectedReportUploadPatientId] = useState("");
   const [documentFolderId, setDocumentFolderId] = useState("");
   const [documentFolderLoading, setDocumentFolderLoading] = useState(false);
-  const [reportUploadProjectId, setReportUploadProjectId] = useState("");
+  const [reportUploadRequestJson, setReportUploadRequestJson] = useState("");
   const [reportUploadPreviewJson, setReportUploadPreviewJson] = useState("");
   const [showReportUploadPreviewDialog, setShowReportUploadPreviewDialog] = useState(false);
   const [reportUploadSubmitting, setReportUploadSubmitting] = useState(false);
@@ -563,7 +572,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       setSelectedReportUploadPatientId("");
       setDocumentFolderId("");
       setDocumentFolderLoading(false);
-      setReportUploadProjectId("");
+      setReportUploadRequestJson("");
       setReportUploadPreviewJson("");
       setShowReportUploadPreviewDialog(false);
       setReportUploadSubmitting(false);
@@ -917,7 +926,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setReportUploadIntegrationTestsLoading(false);
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
-    setReportUploadProjectId("");
+    setReportUploadRequestJson("");
     setReportUploadPreviewJson("");
     setShowReportUploadPreviewDialog(false);
     setReportUploadSubmitting(false);
@@ -974,7 +983,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setDocumentFolderLoading(false);
-    setReportUploadProjectId("");
+    setReportUploadRequestJson("");
     setReportUploadPreviewJson("");
     setShowReportUploadPreviewDialog(false);
     setReportUploadSubmitting(false);
@@ -1019,7 +1028,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setDocumentFolderLoading(false);
-    setReportUploadProjectId("");
+    setReportUploadRequestJson("");
     setReportUploadPreviewJson("");
     setShowReportUploadPreviewDialog(false);
     setReportUploadSubmitting(false);
@@ -1087,32 +1096,103 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   };
 
   const handleRunReportUploadTest = async () => {
-    if (!isProjectDataDownloadIntegrationTest) {
+    if (!isDocumentUploadIntegrationTest && !isProjectDataDownloadIntegrationTest) {
       return;
     }
-
-    const projectPayload = {
-      debug_test: true,
-      Event: "Created",
-      OrgId: 8759,
-      Other: {
-        PhaseId: 192817,
-        ProjectTypeId: 31878,
-      },
-      Object: "Project",
-      UserId: 88460,
-      ObjectId: {
-        ProjectId: toIntegrationTestNumber(reportUploadProjectId),
-      },
-      UserType: "ServiceAccount",
-      ProjectId: toIntegrationTestNumber(reportUploadProjectId),
-      Timestamp: Date.now(),
-    };
 
     setReportUploadError("");
     setReportUploadSubmitting(true);
 
     try {
+      if (isDocumentUploadIntegrationTest) {
+        if (!selectedReportUploadPatientId) {
+          throw new Error("Select a patient before running the document upload test.");
+        }
+
+        if (!String(documentFolderId || "").trim()) {
+          throw new Error("Document Folder ID is required before running the document upload test.");
+        }
+
+        const selectedPatient = reportUploadPatients.find(
+          (patient) => String(patient?.patient_id ?? "") === String(selectedReportUploadPatientId)
+        );
+        const patientProjectId = getPatientCompanyProjectId(selectedPatient);
+
+        if (!patientProjectId) {
+          throw new Error("The selected patient is missing company_project_id.");
+        }
+
+        const linkResponse = await apiRequest(COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API);
+
+        if (!linkResponse.ok) {
+          throw new Error(
+            await readErrorMessage(
+              linkResponse,
+              `Document link request failed with status ${linkResponse.status}`
+            )
+          );
+        }
+
+        const linkPayload = await linkResponse.json().catch(() => null);
+        const documentUrl = String(linkPayload?.document_url ?? "").trim();
+        if (!documentUrl) {
+          throw new Error("Document download response is missing document_url.");
+        }
+
+        const uploadPayload = {
+          document_url: documentUrl,
+          project_id: patientProjectId,
+          folder_id: String(documentFolderId || "").trim(),
+          company_id: Number(company?.company_id) || company?.company_id,
+        };
+
+        const uploadResponse = await apiRequest(FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(uploadPayload),
+        });
+
+        const uploadContentType = uploadResponse.headers.get("content-type") || "";
+        const uploadResponsePayload = uploadContentType.includes("application/json")
+          ? await uploadResponse.json().catch(() => null)
+          : await uploadResponse.text().catch(() => "");
+
+        const formattedResponse = typeof uploadResponsePayload === "string"
+          ? uploadResponsePayload || `Request completed with status ${uploadResponse.status}.`
+          : JSON.stringify(uploadResponsePayload ?? {
+              status: uploadResponse.status,
+              ok: uploadResponse.ok,
+            }, null, 2);
+
+        setReportUploadPreviewJson(formattedResponse);
+        setShowReportUploadPreviewDialog(true);
+
+        if (!uploadResponse.ok) {
+          setReportUploadError(`Integration test request failed with status ${uploadResponse.status}`);
+        }
+
+        return;
+      }
+
+      const trimmedRequestJson = String(reportUploadRequestJson || "").trim();
+      if (!trimmedRequestJson) {
+        throw new Error("Request JSON is required before running the project data download test.");
+      }
+
+      let projectPayload;
+
+      try {
+        projectPayload = JSON.parse(trimmedRequestJson);
+      } catch {
+        throw new Error("Request JSON must be valid JSON.");
+      }
+
+      if (!projectPayload || Array.isArray(projectPayload) || typeof projectPayload !== "object") {
+        throw new Error("Request JSON must be a JSON object.");
+      }
+
+      projectPayload.debug_test = true;
+
       const response = await apiRequest(
         `${FILEVINE_INTEGRATION_TEST_API_BASE}${encodeURIComponent(company.company_id)}/`,
         {
@@ -1754,12 +1834,13 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                     )}
 
                     {isProjectDataDownloadIntegrationTest && (
-                      <Detail label="Project ID">
-                        <input
-                          type="text"
-                          value={reportUploadProjectId}
-                          onChange={(event) => setReportUploadProjectId(event.target.value)}
-                          placeholder="Enter project ID"
+                      <Detail label="Request JSON">
+                        <textarea
+                          value={reportUploadRequestJson}
+                          onChange={(event) => setReportUploadRequestJson(event.target.value)}
+                          placeholder="Paste or type a JSON object"
+                          rows={10}
+                          style={{ resize: "vertical", minHeight: 180 }}
                         />
                       </Detail>
                     )}
