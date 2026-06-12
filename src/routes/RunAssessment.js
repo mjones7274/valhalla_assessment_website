@@ -30,6 +30,16 @@ const normalizePrefillPrompt = (value) => {
   return normalized;
 };
 
+const isInjuryEventDatePrompt = (value) => {
+  const normalized = normalizePrefillPrompt(value);
+  return (
+    normalized === "date of injury" ||
+    normalized === "injury date" ||
+    normalized === "date of event" ||
+    normalized === "event date"
+  );
+};
+
 const parseDateOnlyYmd = (raw) => {
   const value = String(raw ?? "").trim();
   if (!value) return null;
@@ -975,6 +985,16 @@ const matchesSelectableOption = (item, optionItem) => {
   const itemIdentity = buildSelectableItemIdentity(item);
   const optionIdentity = buildSelectableItemIdentity(optionItem);
   return Boolean(itemIdentity) && Boolean(optionIdentity) && itemIdentity === optionIdentity;
+};
+
+const isExclusiveNoneMultiSelectOption = (item) => {
+  const normalizedLabels = [item?.option, item?.label, item?.value]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+
+  return normalizedLabels.some(
+    (label) => label === "none" || label === "none of these"
+  );
 };
 
 const getSubquestionSelectionsFromResponseValue = (responseValue) => {
@@ -1982,12 +2002,14 @@ export default function RunAssessment({
   const [subquestionSelectionsByQuestionId, setSubquestionSelectionsByQuestionId] = useState({});
   const [activeSubquestionPopup, setActiveSubquestionPopup] = useState(null);
   const [activeOptionMoreInfoCard, setActiveOptionMoreInfoCard] = useState(null);
+  const [isAutoAdvancingHiddenQuestion, setIsAutoAdvancingHiddenQuestion] = useState(false);
   const currentSignaturePdfExporterRef = useRef(null);
   const responsesRef = useRef({});
   const subquestionSelectionsByQuestionIdRef = useRef({});
   const responseIdByQuestionIdRef = useRef({});
   const appliedStartRequestRef = useRef(null);
   const optionMoreInfoTimerRef = useRef(null);
+  const autoAdvanceHiddenQuestionKeyRef = useRef("");
 
   const clearOptionMoreInfoTimer = () => {
     if (optionMoreInfoTimerRef.current !== null) {
@@ -2907,6 +2929,8 @@ export default function RunAssessment({
     `${currentItem?.sectionId ?? "section"}-${currentItem?.questionOrder ?? currentIndex + 1}`;
 
   const questionType = normalizeQuestionType(question);
+  const isInjuryEventDateQuestion =
+    isInjuryEventDatePrompt(question?.question) || isInjuryEventDatePrompt(question?.title);
   const isZipcodeQuestion = questionType === "zipcode" || questionType === "zip_code";
   const isSignatureAgreementQuestion = questionType === "signature_agreement";
   const isNoResponseQuestion =
@@ -2951,6 +2975,8 @@ export default function RunAssessment({
   const isIncompleteSignatureAgreement =
     isSignatureAgreementQuestion &&
     (!hasAgreementDocumentViewed || !hasAgreementSignatureDrawing || !hasAgreementSignatureName);
+
+  const shouldAutoSkipCurrentQuestion = isInjuryEventDateQuestion && hasCurrentResponse;
 
   useEffect(() => {
     setActiveSubquestionPopup(null);
@@ -3761,6 +3787,11 @@ export default function RunAssessment({
   };
 
   useEffect(() => {
+    autoAdvanceHiddenQuestionKeyRef.current = "";
+    setIsAutoAdvancingHiddenQuestion(false);
+  }, [currentIndex, questionId]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     try {
@@ -3827,16 +3858,7 @@ export default function RunAssessment({
         if (prefillContext?.dobYmd) {
           prefillValue = prefillContext.dobYmd;
         }
-      } else if (
-        prompt === "date of injury" ||
-        prompt === "injury date" ||
-        prompt === "date of event" ||
-        prompt === "event date" ||
-        titlePrompt === "date of injury" ||
-        titlePrompt === "injury date" ||
-        titlePrompt === "date of event" ||
-        titlePrompt === "event date"
-      ) {
+      } else if (isInjuryEventDatePrompt(prompt) || isInjuryEventDatePrompt(titlePrompt)) {
         if (prefillContext?.eventDateYmd) {
           prefillValue = prefillContext.eventDateYmd;
         }
@@ -3877,6 +3899,64 @@ export default function RunAssessment({
     currentItem,
     responses,
     prefillContext,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || !isAttemptReady) return;
+    if (!currentItem || !shouldAutoSkipCurrentQuestion) return;
+    if (isSubmitting) return;
+
+    const autoAdvanceKey = `${currentIndex}:${questionId}`;
+    if (autoAdvanceHiddenQuestionKeyRef.current === autoAdvanceKey) return;
+
+    autoAdvanceHiddenQuestionKeyRef.current = autoAdvanceKey;
+    setIsAutoAdvancingHiddenQuestion(true);
+
+    const advance = async () => {
+      try {
+        if (currentIndex === totalQuestions - 1) {
+          submitAssessment();
+          return;
+        }
+
+        const nextIndex = Math.min(totalQuestions - 1, currentIndex + 1);
+        if (nextIndex === currentIndex) return;
+
+        transitionToIndex(nextIndex, "forward");
+
+        try {
+          await clearConditionalResponsesForCurrentQuestionWhenFalse();
+        } catch (error) {
+          console.error("Failed to clear conditional responses on hidden next", error);
+        }
+
+        if (canPersistAttempts && attemptId) {
+          try {
+            await persistResponseAndAttemptState({
+              targetIndex: nextIndex,
+              status: "in_progress",
+            });
+          } catch (error) {
+            console.error("Failed to persist hidden next navigation", error);
+          }
+        }
+      } finally {
+        setIsAutoAdvancingHiddenQuestion(false);
+      }
+    };
+
+    advance();
+  }, [
+    isOpen,
+    isAttemptReady,
+    currentItem,
+    shouldAutoSkipCurrentQuestion,
+    isSubmitting,
+    currentIndex,
+    questionId,
+    totalQuestions,
+    canPersistAttempts,
+    attemptId,
   ]);
 
   const selectOptions = normalizeOptions(question)
@@ -4397,7 +4477,7 @@ export default function RunAssessment({
     perform();
   };
 
-  if (!isAttemptReady || isResolvingRequestedStart) {
+  if (!isAttemptReady || isResolvingRequestedStart || isAutoAdvancingHiddenQuestion) {
     return (
       <div className="run-assessment-overlay">
         <div className="run-assessment-modal">
@@ -4414,7 +4494,9 @@ export default function RunAssessment({
             </div>
             <div className="run-assessment-shell run-assessment-shell-static">
               <div className="run-assessment-empty">
-                {isResolvingRequestedStart
+                {isAutoAdvancingHiddenQuestion
+                  ? "Loading next question..."
+                  : isResolvingRequestedStart
                   ? "Opening selected question..."
                   : "Loading assessment progress..."}
               </div>
@@ -4698,6 +4780,7 @@ export default function RunAssessment({
             const parentOptionId = buildSelectableItemIdentity(optionItem);
             const exists = selectedItems.some((item) => matchesSelectableOption(item, optionItem));
             const shouldShowSubquestion = shouldAllowSubquestionForAnswerValue(optionItem?.value);
+            const isExclusiveNoneOption = isExclusiveNoneMultiSelectOption(optionItem);
 
             if (exists) {
               setSubquestionSelectionsWithRef((prev) => {
@@ -4739,16 +4822,26 @@ export default function RunAssessment({
                 return currentItems;
               }
 
+              const nextItem = {
+                order: optionOrder,
+                option: optionItem.option,
+                value: optionItem.value,
+                ...(Object.prototype.hasOwnProperty.call(optionItem ?? {}, "category")
+                  ? { category: optionItem.category }
+                  : {}),
+              };
+
+              if (isExclusiveNoneOption) {
+                return [nextItem];
+              }
+
+              const filteredItems = currentItems.filter(
+                (item) => !isExclusiveNoneMultiSelectOption(item)
+              );
+
               return [
-                ...currentItems,
-                {
-                  order: optionOrder,
-                  option: optionItem.option,
-                  value: optionItem.value,
-                  ...(Object.prototype.hasOwnProperty.call(optionItem ?? {}, "category")
-                    ? { category: optionItem.category }
-                    : {}),
-                },
+                ...filteredItems,
+                nextItem,
               ];
             });
 

@@ -16,9 +16,51 @@ const API_DEBUG_API = `${API_BASE}/api/api-debug/`;
 const INTEGRATION_TYPES_API = `${API_BASE}/api/integration-types/`;
 const INTEGRATION_TYPE_TESTS_API = `${API_BASE}/api/integration-type-tests/`;
 const COMPANY_PATIENTS_VIEW_API = `${API_BASE}/api/company-patients-view/`;
+const PATIENTS_VIEW_API_URL = `${API_BASE}/api/patients-view/`;
 const FILEVINE_INTEGRATION_TEST_API_BASE = `${API_BASE}/api/integrations/filevine/`;
 const COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API = `${API_BASE}/api/document-download/get-link/cognitrackx_report/example/`;
 const FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/`;
+const BODYIQ_SEND_ORDER_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
+
+const DEFAULT_BODY_IQ_ORDER_DATA = JSON.stringify({
+  order: {
+    email: "patient@example.com",
+    phone: "5551234567",
+    financial_status: "paid",
+    send_receipt: false,
+    send_fulfillment_receipt: false,
+    line_items: [
+      {
+        sku: "VH-BRAIN-CITRUS",
+        quantity: 1,
+        price: "72.00",
+      },
+    ],
+    customer: {
+      first_name: "First",
+      last_name: "Last",
+      email: "patient@example.com",
+      phone: "5551234567",
+    },
+    shipping_address: {
+      first_name: "First",
+      last_name: "Last",
+      address1: "100 Main St",
+      address2: "Suite 101",
+      city: "Salt Lake City",
+      province_code: "UT",
+      country_code: "US",
+      zip: "84101",
+      phone: "5551234567",
+    },
+    tags: "test-do-not-fulfill",
+    note_attributes: [
+      { name: "patient_id", value: "1000" },
+      { name: "subscription_type", value: "30_day" },
+      { name: "source", value: "valhalla" },
+    ],
+  },
+}, null, 2);
 
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
@@ -122,6 +164,48 @@ const fetchCompanyLogoUrl = async (companyId) => {
   return String(payload?.logo_url || "").trim();
 };
 
+const tryParseJsonString = (value) => {
+  const trimmedValue = String(value || "").trim();
+  if (!trimmedValue) return null;
+  if (!(trimmedValue.startsWith("{") || trimmedValue.startsWith("["))) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return null;
+  }
+};
+
+const normalizeJsonDisplayValue = (value) => {
+  if (typeof value === "string") {
+    const parsedValue = tryParseJsonString(value);
+    return parsedValue === null ? value : normalizeJsonDisplayValue(parsedValue);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeJsonDisplayValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [key, normalizeJsonDisplayValue(entryValue)])
+    );
+  }
+
+  return value;
+};
+
+const formatJsonDisplayString = (value) => {
+  const parsedValue = tryParseJsonString(value);
+  if (parsedValue !== null) {
+    return JSON.stringify(normalizeJsonDisplayValue(parsedValue), null, 2);
+  }
+
+  return String(value || "");
+};
+
 const getCompanyIdFromCompanyPerson = (cp) => {
   return Number(
     cp.company_id ?? cp.company?.company_id ?? cp.company?.id ?? 0
@@ -222,6 +306,12 @@ const getPatientOptionLabel = (patient) => {
   return `${patientName} (${patientId})`;
 };
 
+const getCompanyOptionLabel = (companyRecord) => {
+  const companyName = String(companyRecord?.company_name || "").trim() || "Unknown Company";
+  const companyId = companyRecord?.company_id ?? "—";
+  return `${companyName} (${companyId})`;
+};
+
 const getPatientRootFolder = (patientRecord) => {
   const rootFolder = patientRecord?.company_payload?.root_folder;
   return rootFolder === null || rootFolder === undefined ? "" : String(rootFolder);
@@ -237,6 +327,95 @@ const getPatientCompanyProjectId = (patientRecord) => {
     patientRecord?.company?.company_project_id;
 
   return projectId === null || projectId === undefined ? "" : String(projectId).trim();
+};
+
+const getMobilePhoneFromPatientRecord = (patientRecord) => {
+  const phones = Array.isArray(patientRecord?.phones) ? patientRecord.phones : [];
+  const mobilePhone = phones.find((phoneRecord) =>
+    String(phoneRecord?.phone_type?.description || "").trim().toLowerCase() === "mobile"
+  );
+
+  return String(mobilePhone?.phone || phones[0]?.phone || "").trim();
+};
+
+const getPreferredAddressFromPatientRecord = (patientRecord) => {
+  const addresses = Array.isArray(patientRecord?.addresses) ? patientRecord.addresses : [];
+  if (addresses.length === 0) return null;
+  if (addresses.length === 1) return addresses[0];
+
+  const findByType = (targetType) => addresses.find((address) =>
+    String(address?.address_type?.description || "").trim().toLowerCase() === targetType
+  );
+
+  return findByType("shipping") || findByType("home") || addresses[0];
+};
+
+const getCountryCodeFromPatientAddress = (country) => {
+  const normalizedCountry = String(country || "").trim();
+  if (!normalizedCountry) return "";
+
+  const upperCountry = normalizedCountry.toUpperCase();
+  if (upperCountry.length === 2) {
+    return upperCountry;
+  }
+
+  const countryCodeMap = {
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    USA: "US",
+  };
+
+  return countryCodeMap[upperCountry] || "";
+};
+
+const buildBodyIqOrderDataJson = (patientRecord) => {
+  const selectedAddress = getPreferredAddressFromPatientRecord(patientRecord);
+  const patientPhone = getMobilePhoneFromPatientRecord(patientRecord);
+  const provinceCode = String(selectedAddress?.st || "").trim().slice(0, 2).toUpperCase();
+  const countryCode = getCountryCodeFromPatientAddress(selectedAddress?.country);
+  const patientEmail = patientRecord?.email ?? null;
+  const patientFirstName = String(patientRecord?.first_name || "");
+  const patientLastName = String(patientRecord?.last_name || "");
+
+  return JSON.stringify({
+    order: {
+      email: patientEmail,
+      phone: patientPhone,
+      financial_status: "paid",
+      send_receipt: false,
+      send_fulfillment_receipt: false,
+      line_items: [
+        {
+          sku: "VH-BRAIN-CITRUS",
+          quantity: 1,
+          price: "92.00",
+        },
+      ],
+      customer: {
+        first_name: patientFirstName,
+        last_name: patientLastName,
+        email: patientEmail,
+        phone: patientPhone,
+      },
+      shipping_address: {
+        first_name: patientFirstName,
+        last_name: patientLastName,
+        address1: String(selectedAddress?.street_1 || ""),
+        address2: String(selectedAddress?.street_2 || ""),
+        city: String(selectedAddress?.city || ""),
+        province_code: provinceCode,
+        country_code: countryCode,
+        zip: String(selectedAddress?.zip || ""),
+        phone: patientPhone,
+      },
+      tags: "test-do-not-fulfill",
+      note_attributes: [
+        { name: "patient_id", value: patientRecord?.patient_id ?? "" },
+        { name: "subscription_type", value: "3_month" },
+        { name: "source", value: "valhalla" },
+      ],
+    },
+  }, null, 2);
 };
 
 const getIntegrationTypeTestOptionValue = (integrationTypeTest) => {
@@ -458,6 +637,7 @@ const Companies = () => {
         ) : (
             <CompanyModal
             company={selectedCompany}
+            allCompanies={companies}
             mode={modalMode}
             userTypeId={getUserTypeId(user)}
             onClose={() => setModalMode(null)}
@@ -483,7 +663,7 @@ export default Companies;
    Modal Component
 ---------------------------------- */
 
-const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
+const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpdated }) => {
   const isEdit = mode === "edit";
   const isCorporateAdmin = Number(userTypeId) === 3;
 
@@ -531,8 +711,14 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   const [reportUploadPatients, setReportUploadPatients] = useState([]);
   const [selectedReportUploadPatientId, setSelectedReportUploadPatientId] = useState("");
   const [documentFolderId, setDocumentFolderId] = useState("");
+  const [reportUploadProjectId, setReportUploadProjectId] = useState("");
   const [documentFolderLoading, setDocumentFolderLoading] = useState(false);
   const [reportUploadRequestJson, setReportUploadRequestJson] = useState("");
+  const [bodyIqSelectedCompanyId, setBodyIqSelectedCompanyId] = useState("");
+  const [bodyIqPatients, setBodyIqPatients] = useState([]);
+  const [bodyIqPatientsLoading, setBodyIqPatientsLoading] = useState(false);
+  const [bodyIqSelectedPatientId, setBodyIqSelectedPatientId] = useState("");
+  const [bodyIqOrderDataJson, setBodyIqOrderDataJson] = useState(DEFAULT_BODY_IQ_ORDER_DATA);
   const [reportUploadPreviewJson, setReportUploadPreviewJson] = useState("");
   const [showReportUploadPreviewDialog, setShowReportUploadPreviewDialog] = useState(false);
   const [reportUploadSubmitting, setReportUploadSubmitting] = useState(false);
@@ -571,8 +757,14 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       setReportUploadPatients([]);
       setSelectedReportUploadPatientId("");
       setDocumentFolderId("");
+      setReportUploadProjectId("");
       setDocumentFolderLoading(false);
       setReportUploadRequestJson("");
+      setBodyIqSelectedCompanyId("");
+      setBodyIqPatients([]);
+      setBodyIqPatientsLoading(false);
+      setBodyIqSelectedPatientId("");
+      setBodyIqOrderDataJson(DEFAULT_BODY_IQ_ORDER_DATA);
       setReportUploadPreviewJson("");
       setShowReportUploadPreviewDialog(false);
       setReportUploadSubmitting(false);
@@ -921,12 +1113,19 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
     setReportUploadLoading(true);
     setReportUploadError("");
+    setSelectedReportUploadIntegrationType("");
     setReportUploadIntegrationTests([]);
     setSelectedReportUploadIntegrationTestId("");
     setReportUploadIntegrationTestsLoading(false);
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
+    setReportUploadProjectId("");
     setReportUploadRequestJson("");
+    setBodyIqSelectedCompanyId("");
+    setBodyIqPatients([]);
+    setBodyIqPatientsLoading(false);
+    setBodyIqSelectedPatientId("");
+    setBodyIqOrderDataJson(DEFAULT_BODY_IQ_ORDER_DATA);
     setReportUploadPreviewJson("");
     setShowReportUploadPreviewDialog(false);
     setReportUploadSubmitting(false);
@@ -982,6 +1181,7 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setSelectedReportUploadIntegrationTestId("");
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
+    setReportUploadProjectId("");
     setDocumentFolderLoading(false);
     setReportUploadRequestJson("");
     setReportUploadPreviewJson("");
@@ -1027,18 +1227,104 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
     setSelectedReportUploadIntegrationTestId(integrationTestId);
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
+    setReportUploadProjectId("");
     setDocumentFolderLoading(false);
     setReportUploadRequestJson("");
+    setBodyIqSelectedCompanyId("");
+    setBodyIqPatients([]);
+    setBodyIqPatientsLoading(false);
+    setBodyIqSelectedPatientId("");
+    setBodyIqOrderDataJson(DEFAULT_BODY_IQ_ORDER_DATA);
     setReportUploadPreviewJson("");
     setShowReportUploadPreviewDialog(false);
     setReportUploadSubmitting(false);
     setReportUploadError("");
   }, []);
 
+  const handleBodyIqCompanyChange = useCallback(async (event) => {
+    const selectedCompanyId = event.target.value;
+
+    setBodyIqSelectedCompanyId(selectedCompanyId);
+    setBodyIqPatients([]);
+    setBodyIqSelectedPatientId("");
+    setBodyIqOrderDataJson(DEFAULT_BODY_IQ_ORDER_DATA);
+    setReportUploadError("");
+
+    if (!selectedCompanyId) {
+      setBodyIqPatientsLoading(false);
+      return;
+    }
+
+    setBodyIqPatientsLoading(true);
+
+    try {
+      const response = await apiRequest(
+        `${COMPANY_PATIENTS_VIEW_API}?company_id=${encodeURIComponent(selectedCompanyId)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(
+            response,
+            `Company patients request failed with status ${response.status}`
+          )
+        );
+      }
+
+      const payload = await response.json();
+      setBodyIqPatients(dedupeCompanyPatients(payload));
+    } catch (error) {
+      console.error("Failed to load Body IQ patients", error);
+      setBodyIqPatients([]);
+      setReportUploadError(error?.message || "Failed to load patients for the selected company.");
+    } finally {
+      setBodyIqPatientsLoading(false);
+    }
+  }, []);
+
+  const handleBodyIqPatientChange = useCallback(async (event) => {
+    const patientId = event.target.value;
+
+    setBodyIqSelectedPatientId(patientId);
+    setBodyIqOrderDataJson(DEFAULT_BODY_IQ_ORDER_DATA);
+    setReportUploadError("");
+
+    if (!patientId) {
+      return;
+    }
+
+    const requestUrlWithSlash = `${PATIENTS_VIEW_API_URL}${encodeURIComponent(patientId)}/`;
+    const requestUrlWithoutSlash = `${PATIENTS_VIEW_API_URL.replace(/\/$/, "")}/${encodeURIComponent(patientId)}`;
+
+    try {
+      let response = await apiRequest(requestUrlWithSlash);
+      if (!response.ok && response.status === 404) {
+        response = await apiRequest(requestUrlWithoutSlash);
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(
+            response,
+            `Patient details request failed with status ${response.status}`
+          )
+        );
+      }
+
+      const payload = await response.json();
+      const patientRecord = Array.isArray(payload) ? payload[0] : payload;
+      setBodyIqOrderDataJson(buildBodyIqOrderDataJson(patientRecord));
+    } catch (error) {
+      console.error("Failed to load Body IQ patient", error);
+      setReportUploadError(error?.message || "Failed to load the selected patient.");
+    }
+  }, []);
+
   const handleReportUploadPatientChange = useCallback(async (event) => {
     const patientId = event.target.value;
     setSelectedReportUploadPatientId(patientId);
     setDocumentFolderId("");
+    setReportUploadProjectId("");
     setReportUploadError("");
 
     if (!patientId) {
@@ -1064,9 +1350,11 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       const payload = await response.json();
       const selectedPatientRecord = Array.isArray(payload) ? payload[0] : payload;
       setDocumentFolderId(getPatientRootFolder(selectedPatientRecord));
+      setReportUploadProjectId(getPatientCompanyProjectId(selectedPatientRecord));
     } catch (error) {
       console.error("Failed to load patient folder", error);
       setDocumentFolderId("");
+      setReportUploadProjectId("");
       setReportUploadError(error?.message || "Failed to load the selected patient.");
     } finally {
       setDocumentFolderLoading(false);
@@ -1096,30 +1384,83 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
   };
 
   const handleRunReportUploadTest = async () => {
-    if (!isDocumentUploadIntegrationTest && !isProjectDataDownloadIntegrationTest) {
+    if (
+      !isDocumentUploadIntegrationTest &&
+      !isProjectDataDownloadIntegrationTest &&
+      !isFileVineFullPostIntegrationTest &&
+      !isBodyIqSendTestOrderIntegrationTest
+    ) {
       return;
     }
+
+    let bodyIqRequestUrl = null;
+    let bodyIqRequestHeaders = null;
+    let bodyIqResponseStatusCode = null;
+    let bodyIqRequestBody = null;
 
     setReportUploadError("");
     setReportUploadSubmitting(true);
 
     try {
-      if (isDocumentUploadIntegrationTest) {
-        if (!selectedReportUploadPatientId) {
-          throw new Error("Select a patient before running the document upload test.");
+      if (isBodyIqSendTestOrderIntegrationTest) {
+        bodyIqRequestUrl = BODYIQ_SEND_ORDER_INTEGRATION_TEST_API;
+        bodyIqRequestHeaders = {
+          "Content-Type": "application/json",
+        };
+
+        const trimmedOrderDataJson = String(bodyIqOrderDataJson || "").trim();
+        if (!trimmedOrderDataJson) {
+          throw new Error("Order Data is required before running the Body IQ send test order test.");
         }
 
-        if (!String(documentFolderId || "").trim()) {
+        let parsedOrderData;
+
+        try {
+          parsedOrderData = JSON.parse(trimmedOrderDataJson);
+        } catch {
+          throw new Error("Order Data must be valid JSON.");
+        }
+
+        bodyIqRequestBody = parsedOrderData;
+
+        const bodyIqResponse = await apiRequest(bodyIqRequestUrl, {
+          method: "POST",
+          headers: bodyIqRequestHeaders,
+          body: JSON.stringify(parsedOrderData),
+        });
+        bodyIqResponseStatusCode = bodyIqResponse.status;
+
+        const bodyIqContentType = bodyIqResponse.headers.get("content-type") || "";
+        const bodyIqResponsePayload = bodyIqContentType.includes("application/json")
+          ? await bodyIqResponse.json().catch(() => null)
+          : await bodyIqResponse.text().catch(() => "");
+
+        setReportUploadPreviewJson(JSON.stringify({
+          request_url: bodyIqRequestUrl,
+          headers: bodyIqRequestHeaders,
+          request_body: bodyIqRequestBody,
+          response_status_code: bodyIqResponseStatusCode,
+          response_body: bodyIqResponsePayload,
+        }, null, 2));
+        setShowReportUploadPreviewDialog(true);
+
+        if (!bodyIqResponse.ok) {
+          setReportUploadError(`Integration test request failed with status ${bodyIqResponse.status}`);
+        }
+
+        return;
+      }
+
+      if (isDocumentUploadIntegrationTest) {
+        const trimmedDocumentFolderId = String(documentFolderId || "").trim();
+        const trimmedProjectId = String(reportUploadProjectId || "").trim();
+
+        if (!trimmedDocumentFolderId) {
           throw new Error("Document Folder ID is required before running the document upload test.");
         }
 
-        const selectedPatient = reportUploadPatients.find(
-          (patient) => String(patient?.patient_id ?? "") === String(selectedReportUploadPatientId)
-        );
-        const patientProjectId = getPatientCompanyProjectId(selectedPatient);
-
-        if (!patientProjectId) {
-          throw new Error("The selected patient is missing company_project_id.");
+        if (!trimmedProjectId) {
+          throw new Error("Project ID is required before running the document upload test.");
         }
 
         const linkResponse = await apiRequest(COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API);
@@ -1141,8 +1482,8 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
         const uploadPayload = {
           document_url: documentUrl,
-          project_id: patientProjectId,
-          folder_id: String(documentFolderId || "").trim(),
+          project_id: trimmedProjectId,
+          folder_id: trimmedDocumentFolderId,
           company_id: Number(company?.company_id) || company?.company_id,
         };
 
@@ -1176,7 +1517,11 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
       const trimmedRequestJson = String(reportUploadRequestJson || "").trim();
       if (!trimmedRequestJson) {
-        throw new Error("Request JSON is required before running the project data download test.");
+        throw new Error(
+          isFileVineFullPostIntegrationTest
+            ? "Request Payload is required before running the FileVine Full POST Test."
+            : "Request JSON is required before running the project data download test."
+        );
       }
 
       let projectPayload;
@@ -1184,14 +1529,26 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       try {
         projectPayload = JSON.parse(trimmedRequestJson);
       } catch {
-        throw new Error("Request JSON must be valid JSON.");
+        throw new Error(
+          isFileVineFullPostIntegrationTest
+            ? "Request Payload must be valid JSON."
+            : "Request JSON must be valid JSON."
+        );
       }
 
       if (!projectPayload || Array.isArray(projectPayload) || typeof projectPayload !== "object") {
-        throw new Error("Request JSON must be a JSON object.");
+        throw new Error(
+          isFileVineFullPostIntegrationTest
+            ? "Request Payload must be a JSON object."
+            : "Request JSON must be a JSON object."
+        );
       }
 
-      projectPayload.debug_test = true;
+      if (isFileVineFullPostIntegrationTest) {
+        projectPayload.run_ui_end_to_end_test = true;
+      } else {
+        projectPayload.debug_test = true;
+      }
 
       const response = await apiRequest(
         `${FILEVINE_INTEGRATION_TEST_API_BASE}${encodeURIComponent(company.company_id)}/`,
@@ -1228,7 +1585,20 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
       console.error("Failed to run integration test", error);
       const errorMessage = error?.message || "Failed to run integration test.";
       setReportUploadError(errorMessage);
-      setReportUploadPreviewJson(errorMessage);
+
+      if (isBodyIqSendTestOrderIntegrationTest) {
+        setReportUploadPreviewJson(JSON.stringify({
+          request_url: bodyIqRequestUrl,
+          headers: bodyIqRequestHeaders,
+          request_body: bodyIqRequestBody,
+          response_status_code: bodyIqResponseStatusCode,
+          response_body: null,
+          error: errorMessage,
+        }, null, 2));
+      } else {
+        setReportUploadPreviewJson(errorMessage);
+      }
+
       setShowReportUploadPreviewDialog(true);
     } finally {
       setReportUploadSubmitting(false);
@@ -1237,6 +1607,22 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
   const isDocumentUploadIntegrationTest = Number(selectedReportUploadIntegrationTestId) === 1;
   const isProjectDataDownloadIntegrationTest = Number(selectedReportUploadIntegrationTestId) === 2;
+  const selectedReportUploadIntegrationTypeLabel = getIntegrationTypeOptionLabel(
+    reportUploadIntegrationTypes.find(
+      (integrationType) => getIntegrationTypeOptionValue(integrationType) === String(selectedReportUploadIntegrationType)
+    )
+  ).trim().toLowerCase();
+  const selectedReportUploadIntegrationTestLabel = getIntegrationTypeTestOptionLabel(
+    reportUploadIntegrationTests.find(
+      (integrationTest) => getIntegrationTypeTestOptionValue(integrationTest) === String(selectedReportUploadIntegrationTestId)
+    )
+  ).trim().toLowerCase();
+  const isBodyIqSendTestOrderIntegrationTest =
+    selectedReportUploadIntegrationTypeLabel === "body iq" &&
+    selectedReportUploadIntegrationTestLabel === "send test order";
+  const isFileVineFullPostIntegrationTest =
+    selectedReportUploadIntegrationTypeLabel === "filevine" &&
+    selectedReportUploadIntegrationTestLabel === "full post test";
 
   return (
     <div className="modal-overlay">
@@ -1830,11 +2216,20 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                             placeholder={documentFolderLoading ? "Loading folder ID..." : "Enter document folder ID"}
                           />
                         </Detail>
+
+                        <Detail label="Project ID">
+                          <input
+                            type="text"
+                            value={reportUploadProjectId}
+                            onChange={(event) => setReportUploadProjectId(event.target.value)}
+                            placeholder="Enter project ID"
+                          />
+                        </Detail>
                       </>
                     )}
 
-                    {isProjectDataDownloadIntegrationTest && (
-                      <Detail label="Request JSON">
+                    {(isProjectDataDownloadIntegrationTest || isFileVineFullPostIntegrationTest) && (
+                      <Detail label={isFileVineFullPostIntegrationTest ? "Request Payload" : "Request JSON"}>
                         <textarea
                           value={reportUploadRequestJson}
                           onChange={(event) => setReportUploadRequestJson(event.target.value)}
@@ -1843,6 +2238,71 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
                           style={{ resize: "vertical", minHeight: 180 }}
                         />
                       </Detail>
+                    )}
+
+                    {isBodyIqSendTestOrderIntegrationTest && (
+                      <>
+                        <Detail label="Company">
+                          <select
+                            value={bodyIqSelectedCompanyId}
+                            onChange={handleBodyIqCompanyChange}
+                          >
+                            <option value="">
+                              {Array.isArray(allCompanies) && allCompanies.length > 0
+                                ? "Select a company"
+                                : "No companies available"}
+                            </option>
+                            {(Array.isArray(allCompanies) ? allCompanies : []).map((companyRecord, index) => {
+                              const optionValue = String(companyRecord?.company_id ?? "");
+                              const optionKey = optionValue || `body-iq-company-${index}`;
+
+                              return (
+                                <option key={optionKey} value={optionValue}>
+                                  {getCompanyOptionLabel(companyRecord)}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </Detail>
+
+                        <Detail label="Patient">
+                          <select
+                            value={bodyIqSelectedPatientId}
+                            onChange={handleBodyIqPatientChange}
+                            disabled={!bodyIqSelectedCompanyId || bodyIqPatientsLoading}
+                          >
+                            <option value="">
+                              {!bodyIqSelectedCompanyId
+                                ? "Select a company first"
+                                : bodyIqPatientsLoading
+                                  ? "Loading patients..."
+                                  : bodyIqPatients.length === 0
+                                    ? "No patients available"
+                                    : "Select a patient"}
+                            </option>
+                            {bodyIqPatients.map((patient, index) => {
+                              const patientValue = String(patient?.patient_id ?? "");
+                              const patientKey = patientValue || `body-iq-patient-${index}`;
+
+                              return (
+                                <option key={patientKey} value={patientValue}>
+                                  {getPatientOptionLabel(patient)}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </Detail>
+
+                        <Detail label="Order Data">
+                          <textarea
+                            value={bodyIqOrderDataJson}
+                            onChange={(event) => setBodyIqOrderDataJson(event.target.value)}
+                            placeholder="Paste or type order JSON"
+                            rows={14}
+                            style={{ resize: "vertical", minHeight: 260 }}
+                          />
+                        </Detail>
+                      </>
                     )}
                   </div>
 
@@ -1871,14 +2331,14 @@ const CompanyModal = ({ company, mode, userTypeId, onClose, onUpdated }) => {
 
         {showReportUploadPreviewDialog && (
           <div className="modal-overlay" style={{ zIndex: 1450 }}>
-            <div className="modal modern api-debug-details-modal report-upload-test-modal">
+            <div className="modal modern api-debug-details-modal report-upload-test-modal report-upload-preview-modal">
               <div className="modal-header">
                 <h3>INTEGRATION TEST RESPONSE</h3>
                 <button className="icon-close" onClick={() => setShowReportUploadPreviewDialog(false)}>✕</button>
               </div>
 
               <div className="api-debug-json-block" style={{ marginTop: 0 }}>
-                <pre>{reportUploadPreviewJson}</pre>
+                <pre>{formatJsonDisplayString(reportUploadPreviewJson)}</pre>
               </div>
 
               <div className="modal-actions">

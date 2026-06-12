@@ -762,6 +762,22 @@
   width: min(720px, calc(100vw - 36px));
 }
 
+.report-upload-preview-modal {
+  width: min(920px, calc(100vw - 36px));
+  max-height: 92vh;
+}
+
+.report-upload-preview-modal .api-debug-json-block {
+  min-height: min(68vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+
+.report-upload-preview-modal .api-debug-json-block pre {
+  flex: 1;
+  min-height: 0;
+}
+
 .report-upload-test-modal .detail-label {
   color: #1d4ed8;
   font-size: 1rem;
@@ -813,13 +829,16 @@
 
 .api-debug-json-block pre {
   margin: 0;
-  padding: 10px;
+  padding: 14px;
   background: #0f172a;
   color: #e2e8f0;
   border-radius: 8px;
-  font-size: 0.78rem;
-  line-height: 1.35;
+  font-size: 0.82rem;
+  line-height: 1.5;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .api-debug-error-text-pre {
