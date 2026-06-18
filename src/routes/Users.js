@@ -9,6 +9,7 @@ const USERS_VIEW_URL = `${process.env.REACT_APP_API_URL_BASE}/api/users-view/`;
 
 const Users = () => {
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("user_id");
   const [sortDirection, setSortDirection] = useState("asc");
@@ -16,6 +17,7 @@ const Users = () => {
   const [modalMode, setModalMode] = useState(null); // "view" | "edit" | "add"
 
   const loadUsers = useCallback(async () => {
+    setLoading(true);
     try {
       const withSlashRes = await apiRequest(USERS_VIEW_URL);
       if (withSlashRes.ok) {
@@ -34,6 +36,8 @@ const Users = () => {
     } catch (error) {
       console.error("Failed to load users view", error);
       setUsers([]);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -147,56 +151,77 @@ const Users = () => {
         </thead>
 
         <tbody>
-          {sortedUsers.map((u) => (
-            <tr
-              key={u.user_id}
-              onClick={() => {
-                setSelectedUser(u);
-                setModalMode("view");
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <td>{u.user_id}</td>
-              <td>{u.first_name}</td>
-              <td>{u.last_name}</td>
-              <td>{u.username}</td>
-              <td className="users-col-center">{u.email}</td>
-              <td className="users-col-center">{u.last_login ? new Date(u.last_login).toLocaleString() : "—"}</td>
-              <td className="users-col-center users-companies-cell">
-                {getCompanyList(u).length > 0 ? (
-                  getCompanyList(u).map((companyName, index) => (
-                    <div key={`${u.user_id}-company-${index}`} className="users-company-line">
-                      {companyName}
-                    </div>
-                  ))
-                ) : (
-                  "—"
-                )}
-              </td>
-              <td className="actions">
-                <button
-                  title="View Details"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedUser(u);
-                    setModalMode("view");
-                  }}
-                >
-                  👁
-                </button>
-                <button
-                  title="Edit User"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedUser(u);
-                    setModalMode("edit");
-                  }}
-                >
-                  ✏️
-                </button>
+          {loading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`user-skeleton-${index}`} className="users-table-skeleton-row" aria-hidden="true">
+                <td><div className="users-skeleton-line users-skeleton-id" /></td>
+                <td><div className="users-skeleton-line users-skeleton-name" /></td>
+                <td><div className="users-skeleton-line users-skeleton-name" /></td>
+                <td><div className="users-skeleton-line users-skeleton-username" /></td>
+                <td><div className="users-skeleton-line users-skeleton-email" /></td>
+                <td><div className="users-skeleton-line users-skeleton-login" /></td>
+                <td><div className="users-skeleton-line users-skeleton-companies" /></td>
+                <td><div className="users-skeleton-line users-skeleton-actions" /></td>
+              </tr>
+            ))
+          ) : sortedUsers.length === 0 ? (
+            <tr>
+              <td colSpan={8}>
+                <div className="users-table-empty">No users found.</div>
               </td>
             </tr>
-          ))}
+          ) : (
+            sortedUsers.map((u) => (
+              <tr
+                key={u.user_id}
+                onClick={() => {
+                  setSelectedUser(u);
+                  setModalMode("view");
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <td>{u.user_id}</td>
+                <td>{u.first_name}</td>
+                <td>{u.last_name}</td>
+                <td>{u.username}</td>
+                <td className="users-col-center">{u.email}</td>
+                <td className="users-col-center">{u.last_login ? new Date(u.last_login).toLocaleString() : "—"}</td>
+                <td className="users-col-center users-companies-cell">
+                  {getCompanyList(u).length > 0 ? (
+                    getCompanyList(u).map((companyName, index) => (
+                      <div key={`${u.user_id}-company-${index}`} className="users-company-line">
+                        {companyName}
+                      </div>
+                    ))
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="actions">
+                  <button
+                    title="View Details"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedUser(u);
+                      setModalMode("view");
+                    }}
+                  >
+                    👁
+                  </button>
+                  <button
+                    title="Edit User"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedUser(u);
+                      setModalMode("edit");
+                    }}
+                  >
+                    ✏️
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 

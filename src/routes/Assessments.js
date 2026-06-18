@@ -124,7 +124,19 @@ function Assessments() {
         </div>
 
         {loading ? (
-          <p>Loading assessments...</p>
+          <div className="assessments-grid assessments-skeleton-grid" aria-live="polite" aria-busy="true">
+            {[1, 2, 3, 4, 5, 6].map((slot) => (
+              <div className="assessment-card assessment-card-skeleton" key={`assessment-page-skeleton-${slot}`}>
+                <div className="assessment-skeleton-line assessment-skeleton-heading" />
+                <div className="assessment-skeleton-line assessment-skeleton-title" />
+                <div className="assessment-skeleton-line assessment-skeleton-text" />
+                <div className="assessment-skeleton-line assessment-skeleton-text short" />
+                <div className="assessment-skeleton-line assessment-skeleton-text" />
+                <div className="assessment-skeleton-line assessment-skeleton-status" />
+                <div className="assessment-skeleton-line assessment-skeleton-button" />
+              </div>
+            ))}
+          </div>
         ) : filteredAssessments.length === 0 ? (
           <p>No assessments found.</p>
         ) : (

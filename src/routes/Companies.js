@@ -20,6 +20,7 @@ const PATIENTS_VIEW_API_URL = `${API_BASE}/api/patients-view/`;
 const FILEVINE_INTEGRATION_TEST_API_BASE = `${API_BASE}/api/integrations/filevine/`;
 const COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API = `${API_BASE}/api/document-download/get-link/cognitrackx_report/example/`;
 const FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/`;
+const FILEVINE_UPLOAD_DOCUMENT_ADD_PROJECT_HASHTAG_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/add-project-hashtag/`;
 const BODYIQ_SEND_ORDER_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
 
 const DEFAULT_BODY_IQ_ORDER_DATA = JSON.stringify({
@@ -480,6 +481,7 @@ const normalizeApiDebugPayload = (payload, requestedPage = 1) => {
 const Companies = () => {
   const { user } = useOutletContext() || {};
   const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("company_id");
   const [sortDirection, setSortDirection] = useState("asc");
@@ -487,10 +489,15 @@ const Companies = () => {
   const [modalMode, setModalMode] = useState(null); // "view" | "edit"
 
   useEffect(() => {
+    setLoading(true);
     apiRequest(API_URL)
       .then((res) => res.json())
-      .then(setCompanies)
-      .catch(console.error);
+      .then((data) => setCompanies(Array.isArray(data) ? data : []))
+      .catch((error) => {
+        console.error(error);
+        setCompanies([]);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   /* ----------------------------------
@@ -580,48 +587,67 @@ const Companies = () => {
         </thead>
 
         <tbody>
-          {sortedCompanies.map((c) => (
-            <tr
-              key={c.company_id}
-              onClick={() => {
-                setSelectedCompany(c);
-                setModalMode("view");
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <td>{c.company_id}</td>
-              <td>{c.company_name}</td>
-              <td>{getCompanyTypeDescription(c)}</td>
-              <td>
-                <span className={`status-pill ${c.is_active ? "active" : "inactive"}`}>
-                  {c.is_active ? "Active" : "Not Active"}
-                </span>
-              </td>
-              <td>{new Date(c.created_on).toLocaleDateString()}</td>
-              <td className="actions">
-                <button
-                  title="View Details"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedCompany(c);
-                    setModalMode("view");
-                  }}
-                >
-                  👁
-                </button>
-                <button
-                  title="Edit Company"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedCompany(c);
-                    setModalMode("edit");
-                  }}
-                >
-                  ✏️
-                </button>
+          {loading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`company-skeleton-${index}`} className="companies-table-skeleton-row" aria-hidden="true">
+                <td><div className="companies-skeleton-line companies-skeleton-id" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-name" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-type" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-status" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-date" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-actions" /></td>
+              </tr>
+            ))
+          ) : sortedCompanies.length === 0 ? (
+            <tr>
+              <td colSpan={6}>
+                <div className="companies-table-empty">No companies found.</div>
               </td>
             </tr>
-          ))}
+          ) : (
+            sortedCompanies.map((c) => (
+              <tr
+                key={c.company_id}
+                onClick={() => {
+                  setSelectedCompany(c);
+                  setModalMode("view");
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <td>{c.company_id}</td>
+                <td>{c.company_name}</td>
+                <td>{getCompanyTypeDescription(c)}</td>
+                <td>
+                  <span className={`status-pill ${c.is_active ? "active" : "inactive"}`}>
+                    {c.is_active ? "Active" : "Not Active"}
+                  </span>
+                </td>
+                <td>{new Date(c.created_on).toLocaleDateString()}</td>
+                <td className="actions">
+                  <button
+                    title="View Details"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedCompany(c);
+                      setModalMode("view");
+                    }}
+                  >
+                    👁
+                  </button>
+                  <button
+                    title="Edit Company"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedCompany(c);
+                      setModalMode("edit");
+                    }}
+                  >
+                    ✏️
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 
@@ -712,6 +738,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
   const [selectedReportUploadPatientId, setSelectedReportUploadPatientId] = useState("");
   const [documentFolderId, setDocumentFolderId] = useState("");
   const [reportUploadProjectId, setReportUploadProjectId] = useState("");
+  const [reportUploadHashtag, setReportUploadHashtag] = useState("");
   const [documentFolderLoading, setDocumentFolderLoading] = useState(false);
   const [reportUploadRequestJson, setReportUploadRequestJson] = useState("");
   const [bodyIqSelectedCompanyId, setBodyIqSelectedCompanyId] = useState("");
@@ -758,6 +785,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
       setSelectedReportUploadPatientId("");
       setDocumentFolderId("");
       setReportUploadProjectId("");
+      setReportUploadHashtag("");
       setDocumentFolderLoading(false);
       setReportUploadRequestJson("");
       setBodyIqSelectedCompanyId("");
@@ -1120,6 +1148,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setReportUploadProjectId("");
+    setReportUploadHashtag("");
     setReportUploadRequestJson("");
     setBodyIqSelectedCompanyId("");
     setBodyIqPatients([]);
@@ -1182,6 +1211,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setReportUploadProjectId("");
+    setReportUploadHashtag("");
     setDocumentFolderLoading(false);
     setReportUploadRequestJson("");
     setReportUploadPreviewJson("");
@@ -1228,6 +1258,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setReportUploadProjectId("");
+    setReportUploadHashtag("");
     setDocumentFolderLoading(false);
     setReportUploadRequestJson("");
     setBodyIqSelectedCompanyId("");
@@ -1386,6 +1417,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
   const handleRunReportUploadTest = async () => {
     if (
       !isDocumentUploadIntegrationTest &&
+      !isDocumentUploadAddHashtagIntegrationTest &&
       !isProjectDataDownloadIntegrationTest &&
       !isFileVineFullPostIntegrationTest &&
       !isBodyIqSendTestOrderIntegrationTest
@@ -1451,9 +1483,10 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
         return;
       }
 
-      if (isDocumentUploadIntegrationTest) {
+      if (isDocumentUploadIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) {
         const trimmedDocumentFolderId = String(documentFolderId || "").trim();
         const trimmedProjectId = String(reportUploadProjectId || "").trim();
+        const trimmedHashtag = String(reportUploadHashtag || "").trim();
 
         if (!trimmedDocumentFolderId) {
           throw new Error("Document Folder ID is required before running the document upload test.");
@@ -1461,6 +1494,10 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
 
         if (!trimmedProjectId) {
           throw new Error("Project ID is required before running the document upload test.");
+        }
+
+        if (isDocumentUploadAddHashtagIntegrationTest && !trimmedHashtag) {
+          throw new Error("Hashtag is required before running the document upload add hashtag test.");
         }
 
         const linkResponse = await apiRequest(COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API);
@@ -1487,7 +1524,11 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
           company_id: Number(company?.company_id) || company?.company_id,
         };
 
-        const uploadResponse = await apiRequest(FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API, {
+        const uploadRequestUrl = isDocumentUploadAddHashtagIntegrationTest
+          ? `${FILEVINE_UPLOAD_DOCUMENT_ADD_PROJECT_HASHTAG_INTEGRATION_TEST_API}${encodeURIComponent(trimmedHashtag)}/`
+          : FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API;
+
+        const uploadResponse = await apiRequest(uploadRequestUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(uploadPayload),
@@ -1620,6 +1661,8 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
   const isBodyIqSendTestOrderIntegrationTest =
     selectedReportUploadIntegrationTypeLabel === "body iq" &&
     selectedReportUploadIntegrationTestLabel === "send test order";
+  const isDocumentUploadAddHashtagIntegrationTest =
+    selectedReportUploadIntegrationTestLabel === "document upload - add hashtag";
   const isFileVineFullPostIntegrationTest =
     selectedReportUploadIntegrationTypeLabel === "filevine" &&
     selectedReportUploadIntegrationTestLabel === "full post test";
@@ -2185,7 +2228,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
                       </select>
                     </Detail>
 
-                    {isDocumentUploadIntegrationTest && (
+                    {(isDocumentUploadIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) && (
                       <>
                         <Detail label="Patient">
                           <select
@@ -2225,6 +2268,17 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
                             placeholder="Enter project ID"
                           />
                         </Detail>
+
+                        {isDocumentUploadAddHashtagIntegrationTest && (
+                          <Detail label="Hashtag">
+                            <input
+                              type="text"
+                              value={reportUploadHashtag}
+                              onChange={(event) => setReportUploadHashtag(event.target.value)}
+                              placeholder="Enter hashtag"
+                            />
+                          </Detail>
+                        )}
                       </>
                     )}
 

@@ -99,6 +99,64 @@
   background: #f8fbff;
 }
 
+.patients-table-skeleton-row {
+  pointer-events: none;
+}
+
+.patients-table-skeleton-row:hover {
+  background: transparent;
+}
+
+.patients-table-skeleton-row td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.patients-table-skeleton-row .skeleton-line {
+  display: block;
+}
+
+.patients-skeleton-id {
+  width: 44px;
+  height: 16px;
+}
+
+.patients-skeleton-name {
+  width: 110px;
+  height: 16px;
+}
+
+.patients-skeleton-email {
+  width: min(100%, 220px);
+  height: 16px;
+}
+
+.patients-skeleton-company {
+  width: min(100%, 180px);
+  height: 16px;
+  margin: 0 auto;
+}
+
+.patients-skeleton-date {
+  width: 92px;
+  height: 16px;
+  margin: 0 auto;
+}
+
+.patients-skeleton-manage {
+  width: 82px;
+  height: 30px;
+  border-radius: 6px;
+  margin: 0 auto;
+}
+
+.patients-skeleton-actions {
+  width: 72px;
+  height: 30px;
+  border-radius: 999px;
+  margin: 0 auto;
+}
+
 .actions button {
   margin-right: 5px;
   cursor: pointer;

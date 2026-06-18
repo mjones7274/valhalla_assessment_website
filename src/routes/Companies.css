@@ -60,6 +60,77 @@
   background: #f8fbff;
 }
 
+@keyframes companies-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.companies-skeleton-line {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 37%, #e5e7eb 63%);
+  background-size: 400% 100%;
+  animation: companies-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.companies-table-skeleton-row {
+  pointer-events: none;
+}
+
+.companies-table-skeleton-row:hover {
+  background: transparent;
+}
+
+.companies-table-skeleton-row td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.companies-skeleton-id {
+  width: 44px;
+  height: 16px;
+}
+
+.companies-skeleton-name {
+  width: min(100%, 180px);
+  height: 16px;
+}
+
+.companies-skeleton-type {
+  width: min(100%, 140px);
+  height: 16px;
+}
+
+.companies-skeleton-status {
+  width: 96px;
+  height: 24px;
+  border-radius: 999px;
+  margin: 0 auto;
+}
+
+.companies-skeleton-date {
+  width: 92px;
+  height: 16px;
+  margin: 0 auto;
+}
+
+.companies-skeleton-actions {
+  width: 72px;
+  height: 30px;
+  border-radius: 999px;
+  margin: 0 auto;
+}
+
+.companies-table-empty {
+  padding: 18px 0;
+  text-align: center;
+  color: #64748b;
+}
+
 .actions button {
   margin-right: 5px;
   cursor: pointer;

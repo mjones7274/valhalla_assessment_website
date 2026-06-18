@@ -650,6 +650,7 @@ const buildAssessmentLinkEmailHtml = ({ firstName, companyName, assessmentLink }
 const Patients = () => {
   const { user } = useOutletContext() || {};
   const [patients, setPatients] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("patient_id");
   const [sortDirection, setSortDirection] = useState("asc");
@@ -668,6 +669,7 @@ const Patients = () => {
 
   useEffect(() => {
     const loadPatients = async () => {
+      setLoading(true);
       try {
         const withSlashRes = await apiRequest(PATIENTS_VIEW_API_URL);
         if (withSlashRes.ok) {
@@ -686,6 +688,8 @@ const Patients = () => {
       } catch (error) {
         console.error("Failed to load patients view", error);
         setPatients([]);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -887,57 +891,78 @@ const Patients = () => {
         </thead>
 
         <tbody>
-          {sortedPatients.map((p) => (
-            <tr
-              key={p.patient_id}
-              onClick={() => {
-                setSelectedPatient(p);
-                setModalMode("view");
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <td>{p.patient_id}</td>
-              <td>{p.first_name}</td>
-              <td>{p.last_name}</td>
-              <td>{p.email}</td>
-              <td>{getCompanyNames(p)}</td>
-              <td>{new Date(p.created_on).toLocaleDateString()}</td>
-              <td>
-                <button
-                  className="assessments-action-btn"
-                  title="Assessments"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setAssessmentPatient(p);
-                  }}
-                >
-                  Manage
-                </button>
-              </td>
-              <td className="actions">
-                <button
-                  title="View Details"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedPatient(p);
-                    setModalMode("view");
-                  }}
-                >
-                  👁
-                </button>
-                <button
-                  title={`Edit ${patientLabels.singular}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedPatient(p);
-                    setModalMode("edit");
-                  }}
-                >
-                  ✏️
-                </button>
+          {loading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`patient-skeleton-${index}`} className="patients-table-skeleton-row" aria-hidden="true">
+                <td><div className="skeleton-line patients-skeleton-id" /></td>
+                <td><div className="skeleton-line patients-skeleton-name" /></td>
+                <td><div className="skeleton-line patients-skeleton-name" /></td>
+                <td><div className="skeleton-line patients-skeleton-email" /></td>
+                <td><div className="skeleton-line patients-skeleton-company" /></td>
+                <td><div className="skeleton-line patients-skeleton-date" /></td>
+                <td><div className="skeleton-line patients-skeleton-manage" /></td>
+                <td><div className="skeleton-line patients-skeleton-actions" /></td>
+              </tr>
+            ))
+          ) : sortedPatients.length === 0 ? (
+            <tr>
+              <td colSpan={8}>
+                <div className="people-empty">No {patientLabels.pluralLower} found.</div>
               </td>
             </tr>
-          ))}
+          ) : (
+            sortedPatients.map((p) => (
+              <tr
+                key={p.patient_id}
+                onClick={() => {
+                  setSelectedPatient(p);
+                  setModalMode("view");
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <td>{p.patient_id}</td>
+                <td>{p.first_name}</td>
+                <td>{p.last_name}</td>
+                <td>{p.email}</td>
+                <td>{getCompanyNames(p)}</td>
+                <td>{new Date(p.created_on).toLocaleDateString()}</td>
+                <td>
+                  <button
+                    className="assessments-action-btn"
+                    title="Assessments"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setAssessmentPatient(p);
+                    }}
+                  >
+                    Manage
+                  </button>
+                </td>
+                <td className="actions">
+                  <button
+                    title="View Details"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedPatient(p);
+                      setModalMode("view");
+                    }}
+                  >
+                    👁
+                  </button>
+                  <button
+                    title={`Edit ${patientLabels.singular}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedPatient(p);
+                      setModalMode("edit");
+                    }}
+                  >
+                    ✏️
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 
