@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api";
 import { replacePatientText, shouldUseClientTerminology } from "../uiTerminology";
@@ -12,7 +12,22 @@ function Assessments() {
   const [showInactiveAssessments, setShowInactiveAssessments] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [cloningAssessmentId, setCloningAssessmentId] = useState(null);
   const navigate = useNavigate();
+
+  const loadAssessments = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const response = await apiRequest(ASSESSMENTS_API);
+      const data = await response.json();
+      setAssessments(data);
+    } catch (err) {
+      console.error("Error fetching assessments:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     // const assessmentType = sessionStorage.getItem("assessment_type");
@@ -23,17 +38,8 @@ function Assessments() {
     //   return;
     // }
 
-    apiRequest(ASSESSMENTS_API)
-      .then((res) => res.json())
-      .then((data) => {
-        setAssessments(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error fetching assessments:", err);
-        setLoading(false);
-      });
-  }, [navigate]);
+    loadAssessments();
+  }, [loadAssessments, navigate]);
 
   const formatDate = (dateString) => {
     if (!dateString) return "—";
@@ -87,6 +93,28 @@ function Assessments() {
   const handleCreatedAssessment = (newAssessment) => {
     setAssessments((prev) => [newAssessment, ...prev]);
     setShowCreateModal(false);
+  };
+
+  const handleCloneAssessment = async (assessmentId) => {
+    if (!assessmentId || cloningAssessmentId !== null) return;
+
+    setCloningAssessmentId(assessmentId);
+
+    try {
+      const response = await apiRequest(`${ASSESSMENTS_API}${assessmentId}/clone/`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Clone assessment failed with status ${response.status}`);
+      }
+
+      await loadAssessments();
+    } catch (error) {
+      console.error("Clone assessment failed", error);
+    } finally {
+      setCloningAssessmentId(null);
+    }
   };
 
   return (
@@ -169,9 +197,22 @@ function Assessments() {
                   <strong>Total Taken:</strong> {formatDate(assessment.last_login)}
                 </p> */}
                 <p>
-                  <strong className="assessment-card-label">Status:</strong>{" "}
-                  <span className={`assessment-status-pill ${isActive ? "active" : "inactive"}`}>
-                    {isActive ? "Active" : "Inactive"}
+                  <span className="assessment-status-row">
+                    <span>
+                      <strong className="assessment-card-label">Status:</strong>{" "}
+                      <span className={`assessment-status-pill ${isActive ? "active" : "inactive"}`}>
+                        {isActive ? "Active" : "Inactive"}
+                      </span>
+                    </span>
+                    <button
+                      className="clone-btn"
+                      onClick={() => handleCloneAssessment(assessment.assessment_id)}
+                      disabled={cloningAssessmentId === assessment.assessment_id}
+                    >
+                      {cloningAssessmentId === assessment.assessment_id
+                        ? "Cloning assessment..."
+                        : "Clone this assessment"}
+                    </button>
                   </span>
                 </p>
 

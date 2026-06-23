@@ -1975,7 +1975,12 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
             <div className="modal modern api-debug-modal">
               <div className="modal-header">
                 <div className="api-debug-modal-title-row">
-                  <h3>API DEBUG DATA</h3>
+                  <div>
+                    <h3>API DEBUG DATA</h3>
+                    <div style={{ fontSize: "0.95rem", color: "#4b5563", marginTop: "4px" }}>
+                      {companyName || company?.company_name || "Unknown Company"}
+                    </div>
+                  </div>
                   <button
                     className="api-debug-refresh-btn"
                     onClick={handleRefreshApiDebugRows}
@@ -2170,7 +2175,12 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
           <div className="modal-overlay" style={{ zIndex: 1400 }}>
             <div className="modal modern api-debug-details-modal report-upload-test-modal">
               <div className="modal-header">
-                <h3>INTEGRATION TEST</h3>
+                <div>
+                  <h3>INTEGRATION TEST</h3>
+                  <div style={{ fontSize: "0.95rem", color: "#4b5563", marginTop: "4px" }}>
+                    {companyName || company?.company_name || "Unknown Company"}
+                  </div>
+                </div>
                 <button className="icon-close" onClick={() => setShowReportUploadTestModal(false)}>✕</button>
               </div>
 
