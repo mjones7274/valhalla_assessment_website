@@ -3,9 +3,9 @@ import { useOutletContext } from "react-router-dom";
 import { FaSyncAlt, FaTrash } from "react-icons/fa";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import CognitrackXReport from "./CognitrackXReport";
+import CognitrackXInvoice from "./CognitrackXInvoice";
 import { apiRequest } from "../api";
-import { getSelectedCompany } from "../auth";
+import { getSelectedCompany, getSessionUserId } from "../auth";
 import { getPatientLabels, shouldUseClientTerminology } from "../uiTerminology";
 import "./Patients.css";
 
@@ -23,17 +23,19 @@ const PATIENT_EVENTS_API = `${API_BASE}/api/patient-events/`;
 const INJURY_EVENT_TYPES_API = `${API_BASE}/api/injury-event-types/`;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
-const PATIENT_RESPONSES_API = `${API_BASE}/api/patient-responses/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
 const TEST_SEND_EMAIL_API = `${API_BASE}/api/test/send-email`;
 const TEST_SEND_EMAIL_API_ALT = `${API_BASE}/api/test/send-email/`;
 const ASSESSMENTS_API = `${API_BASE}/api/assessments/`;
+const COGNITRACKX_REPORT_HTML_API = `${API_BASE}/api/reports/cognitrackx/html`;
 const PEOPLE_API = `${API_BASE}/api/people/`;
 const PERSON_TYPES_API = `${API_BASE}/api/person-types/`;
 const PHONE_TYPES_API = `${API_BASE}/api/phone-types/`;
 const ADDRESS_TYPES_API = `${API_BASE}/api/address-types/`;
+const INTEGRATION_OPTIONS_API = `${API_BASE}/api/integration-options/`;
+const BODYIQ_SEND_ORDER_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
 
 const US_STATES = [
   { value: "AL", label: "Alabama" },
@@ -131,6 +133,259 @@ const getResponseErrorMessage = async (response) => {
   }
 };
 
+const readApiResponseBody = async (response) => {
+  const contentType = response.headers.get("content-type") || "";
+  return contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : await response.text().catch(() => "");
+};
+
+const parseCssColorToRgb = (value) => {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) return null;
+
+  const hexMatch = normalizedValue.match(/#([0-9a-f]{3}|[0-9a-f]{6})/i);
+  if (hexMatch) {
+    const hexValue = hexMatch[1];
+    const expandedHex =
+      hexValue.length === 3
+        ? hexValue
+            .split("")
+            .map((char) => `${char}${char}`)
+            .join("")
+        : hexValue;
+
+    return {
+      r: parseInt(expandedHex.slice(0, 2), 16),
+      g: parseInt(expandedHex.slice(2, 4), 16),
+      b: parseInt(expandedHex.slice(4, 6), 16),
+    };
+  }
+
+  const rgbMatch = normalizedValue.match(/rgba?\(([^)]+)\)/i);
+  if (rgbMatch) {
+    const components = rgbMatch[1]
+      .split(",")
+      .map((component) => Number.parseFloat(component.trim()))
+      .filter((component) => Number.isFinite(component));
+
+    if (components.length >= 3) {
+      return {
+        r: Math.max(0, Math.min(255, Math.round(components[0]))),
+        g: Math.max(0, Math.min(255, Math.round(components[1]))),
+        b: Math.max(0, Math.min(255, Math.round(components[2]))),
+      };
+    }
+  }
+
+  return null;
+};
+
+const getPdfPageBackgroundRgb = (rootElement) => {
+  const ownerDocument = rootElement?.ownerDocument;
+  const ownerWindow = ownerDocument?.defaultView;
+  if (!rootElement || !ownerDocument || !ownerWindow) {
+    return { r: 11, g: 18, b: 32 };
+  }
+
+  const backgroundSources = [
+    ownerDocument.body,
+    ownerDocument.documentElement,
+    rootElement,
+  ].filter(Boolean);
+
+  for (const sourceElement of backgroundSources) {
+    const computedStyle = ownerWindow.getComputedStyle(sourceElement);
+    const directBackgroundColor = parseCssColorToRgb(computedStyle.backgroundColor);
+    if (
+      directBackgroundColor &&
+      !/rgba\(0,\s*0,\s*0,\s*0\)|transparent/i.test(String(computedStyle.backgroundColor || ""))
+    ) {
+      return directBackgroundColor;
+    }
+
+    const backgroundImageColor = parseCssColorToRgb(computedStyle.backgroundImage);
+    if (backgroundImageColor) {
+      return backgroundImageColor;
+    }
+
+    const inlineBackgroundColor = parseCssColorToRgb(sourceElement.style?.backgroundColor);
+    if (inlineBackgroundColor) {
+      return inlineBackgroundColor;
+    }
+
+    const inlineBackground = parseCssColorToRgb(sourceElement.style?.background);
+    if (inlineBackground) {
+      return inlineBackground;
+    }
+  }
+
+  return { r: 11, g: 18, b: 32 };
+};
+
+const getPdfPaginationHints = (rootElement) => {
+  if (!rootElement) {
+    return {
+      forcedBreaks: [],
+      avoidRegions: [],
+      preferredBreaks: [],
+    };
+  }
+
+  const ownerDocument = rootElement.ownerDocument;
+  const ownerWindow = ownerDocument?.defaultView;
+  if (!ownerWindow) {
+    return {
+      forcedBreaks: [],
+      avoidRegions: [],
+      preferredBreaks: [],
+    };
+  }
+
+  const breakMarkerSelector = [
+    "[data-page-break-before]",
+    "[data-page-break-after]",
+    "[data-pdf-page-break-before]",
+    "[data-pdf-page-break-after]",
+    ".page-break",
+    ".page-break-before",
+    ".page-break-after",
+    ".print-page-break",
+    ".print-page-break-before",
+    ".print-page-break-after",
+    ".pdf-page-break",
+    ".pdf-page-break-before",
+    ".pdf-page-break-after",
+  ].join(",");
+
+  const rootRect = rootElement.getBoundingClientRect();
+  const allElements = [rootElement, ...Array.from(rootElement.querySelectorAll("*"))];
+  const markedElements = new Set(rootElement.querySelectorAll(breakMarkerSelector));
+  const forcedBreaks = [];
+  const avoidRegions = [];
+  const preferredBreaks = [];
+
+  allElements.forEach((element, index) => {
+    const computedStyle = ownerWindow.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const top = Math.round(rect.top - rootRect.top);
+    const bottom = Math.round(rect.bottom - rootRect.top);
+    const height = Math.max(0, bottom - top);
+
+    const breakBefore =
+      computedStyle.breakBefore ||
+      computedStyle.pageBreakBefore ||
+      "";
+    const breakAfter =
+      computedStyle.breakAfter ||
+      computedStyle.pageBreakAfter ||
+      "";
+    const breakInside =
+      computedStyle.breakInside ||
+      computedStyle.pageBreakInside ||
+      "";
+    const normalizedBreakBefore = String(breakBefore || "").trim().toLowerCase();
+    const normalizedBreakAfter = String(breakAfter || "").trim().toLowerCase();
+    const normalizedBreakInside = String(breakInside || "").trim().toLowerCase();
+    const classList = Array.from(element.classList || []);
+    const hasPrintCardHint = classList.includes("cx-print-card");
+    const hasPrintDescriptionHint = classList.includes("cx-print-description");
+    const hasPrintTitleRowHint = classList.includes("cx-print-title-row");
+    const hasPrintFollowTitleHint = classList.includes("cx-print-follow-title");
+
+    const hasBeforeMarker =
+      markedElements.has(element) &&
+      (/before/i.test(element.className || "") ||
+        element.hasAttribute("data-page-break-before") ||
+        element.hasAttribute("data-pdf-page-break-before"));
+    const hasAfterMarker =
+      markedElements.has(element) &&
+      (/after/i.test(element.className || "") ||
+        element.hasAttribute("data-page-break-after") ||
+        element.hasAttribute("data-pdf-page-break-after"));
+    const hasGenericMarker =
+      markedElements.has(element) && !hasBeforeMarker && !hasAfterMarker;
+
+    if (
+      ["page", "always", "left", "right"].includes(normalizedBreakBefore) ||
+      hasBeforeMarker ||
+      hasGenericMarker
+    ) {
+      if (top > 0) {
+        forcedBreaks.push(top);
+      }
+    }
+
+    if (["page", "always", "left", "right"].includes(normalizedBreakAfter) || hasAfterMarker) {
+      if (bottom > 0) {
+        forcedBreaks.push(bottom);
+      }
+    }
+
+    if (
+      (normalizedBreakInside.includes("avoid") ||
+        hasPrintCardHint ||
+        hasPrintDescriptionHint ||
+        hasPrintTitleRowHint ||
+        hasPrintFollowTitleHint) &&
+      top > 0 &&
+      height > 0
+    ) {
+      avoidRegions.push({
+        top,
+        bottom,
+        height,
+        preferTopBreak: hasPrintTitleRowHint,
+      });
+    }
+
+    if ((normalizedBreakAfter.includes("avoid") || hasPrintTitleRowHint) && top > 0) {
+      const nextSiblingElement = element.nextElementSibling;
+      const pairedElement = nextSiblingElement ?? allElements[index + 1] ?? null;
+
+      if (pairedElement) {
+        const pairedRect = pairedElement.getBoundingClientRect();
+        const pairedBottom = Math.round(pairedRect.bottom - rootRect.top);
+        if (pairedBottom > top) {
+          avoidRegions.push({
+            top,
+            bottom: pairedBottom,
+            height: Math.max(0, pairedBottom - top),
+            preferTopBreak: true,
+          });
+        }
+      } else if (bottom > top) {
+        avoidRegions.push({ top, bottom, height, preferTopBreak: true });
+      }
+    }
+
+    if (hasPrintFollowTitleHint && top > 0 && bottom > top) {
+      avoidRegions.push({ top, bottom, height, preferTopBreak: false });
+    }
+
+    if ((hasPrintCardHint || hasPrintTitleRowHint || hasPrintFollowTitleHint) && top > 0) {
+      preferredBreaks.push(top);
+    }
+  });
+
+  return {
+    forcedBreaks: Array.from(new Set(forcedBreaks))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((left, right) => left - right),
+    avoidRegions: avoidRegions
+      .filter((region) =>
+        Number.isFinite(region.top) &&
+        Number.isFinite(region.bottom) &&
+        region.top > 0 &&
+        region.bottom > region.top
+      )
+      .sort((left, right) => left.top - right.top),
+    preferredBreaks: Array.from(new Set(preferredBreaks))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((left, right) => left - right),
+  };
+};
+
 const getPhoneRowKey = (phone) =>
   phone?.patient_phone_id ??
   phone?.id ??
@@ -138,9 +393,11 @@ const getPhoneRowKey = (phone) =>
   null;
 
 const getPersistedPhoneId = (phone) =>
-  phone?.patient_phone_id ??
-  phone?.id ??
-  null;
+  phone?._isNew
+    ? null
+    : phone?.patient_phone_id ??
+      phone?.id ??
+      null;
 
 const getAddressRowKey = (address) =>
   address?.patient_address_id ??
@@ -148,29 +405,11 @@ const getAddressRowKey = (address) =>
   null;
 
 const getPersistedAddressId = (address) =>
-  address?.patient_address_id ??
-  address?.id ??
-  null;
-
-const getPhonePatientId = (phone) => Number(
-  phone?.patient_id ??
-  phone?.patient ??
-  phone?.web_patient_id ??
-  phone?.web_patient ??
-  phone?.patient_data?.patient_id ??
-  phone?.patient_obj?.patient_id ??
-  0
-);
-
-const getAddressPatientId = (address) => Number(
-  address?.patient_id ??
-  address?.patient ??
-  address?.web_patient_id ??
-  address?.web_patient ??
-  address?.patient_data?.patient_id ??
-  address?.patient_obj?.patient_id ??
-  0
-);
+  address?._isNew
+    ? null
+    : address?.patient_address_id ??
+      address?.id ??
+      null;
 
 const getPatientRelationCandidates = (patientId) => {
   const normalizedPatientId = Number(patientId ?? 0);
@@ -191,10 +430,6 @@ const getPersonIdFromCompanyPerson = (cp) => {
   return Number(cp.person_id ?? person?.person_id ?? person?.id ?? 0);
 };
 
-const getPatientIdFromPatientPerson = (pp) => Number(
-  pp.patient_id ?? pp.patient?.patient_id ?? pp.patient?.id ?? 0
-);
-
 const getPersonIdFromPatientPerson = (pp) => {
   const person = getPersonFromRelation(pp);
   return Number(pp.person_id ?? person?.person_id ?? person?.id ?? 0);
@@ -212,13 +447,6 @@ const getPatientEventId = (patientEvent) => (
   patientEvent.patient_events_id ??
   patientEvent.id ??
   null
-);
-
-const getPatientIdFromPatientEvent = (patientEvent) => Number(
-  patientEvent.patient_id ??
-  patientEvent.patient?.patient_id ??
-  patientEvent.patient?.id ??
-  0
 );
 
 const getInjuryEventTypeDescription = (eventItem) => (
@@ -263,23 +491,6 @@ const getAttemptId = (attempt) => (
 const getAttemptStatus = (attempt) =>
   attempt.status ?? attempt.attempt_status ?? "assigned";
 
-const getAttemptFinalScore = (attempt) =>
-  attempt.final_score ?? attempt.score ?? attempt.total_score ?? null;
-
-const formatFinalScoreForDisplay = (score) => {
-  if (score === null || score === undefined || score === "") return "—";
-
-  const numericScore = Number(score);
-  if (!Number.isFinite(numericScore)) return String(score);
-
-  const roundedScore = Math.round(numericScore * 100) / 100;
-  if (Number.isInteger(roundedScore)) {
-    return String(roundedScore);
-  }
-
-  return roundedScore.toFixed(2);
-};
-
 const getAssessmentClassificationPillStyle = (classification) => {
   const normalizedClassification = String(classification || "").trim().toLowerCase();
 
@@ -312,6 +523,39 @@ const getAssessmentClassificationPillStyle = (classification) => {
     border: "1px solid #cbd5e1",
     color: "#475569",
   };
+};
+
+const normalizeSupplementOrderTypeOptions = (optionJson) => {
+  const orderTypeEntries = Array.isArray(optionJson?.order_type) ? optionJson.order_type : [];
+
+  return orderTypeEntries.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+
+    return Object.values(entry)
+      .filter((value) => value && typeof value === "object")
+      .map((value) => ({
+        value: String(value?.value || "").trim(),
+        description: String(value?.description || "").trim() || String(value?.value || "").trim(),
+        cost: String(value?.cost ?? "").trim(),
+      }))
+      .filter((value) => value.value);
+  });
+};
+
+const getCountryCodeFromValue = (countryValue) => {
+  const normalizedCountry = String(countryValue || "").trim().toUpperCase();
+
+  if (!normalizedCountry) return "";
+  if (normalizedCountry.length === 2) return normalizedCountry;
+
+  const countryCodeMap = {
+    "UNITED STATES": "US",
+    USA: "US",
+    CANADA: "CA",
+    MEXICO: "MX",
+  };
+
+  return countryCodeMap[normalizedCountry] || normalizedCountry.slice(0, 2);
 };
 
 const getAttemptProgressAttemptId = (progressItem) => Number(
@@ -347,16 +591,6 @@ const normalizeStoredAnswerValue = (value) => {
     return value;
   }
 };
-
-const getResponseAttemptId = (responseItem) => Number(
-  responseItem?.attempt?.id ??
-    responseItem?.attempt_id ??
-    responseItem?.assessment_attempt_id ??
-    responseItem?.patient_assessment_attempt_id ??
-    responseItem?.patient_assessment_attempt ??
-    responseItem?.attempt ??
-    0
-) || 0;
 
 const getPatientResponseId = (responseItem) => Number(
   responseItem?.patient_response_id ??
@@ -1057,6 +1291,20 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const [isDeleteAddressOpen, setIsDeleteAddressOpen] = useState(false);
   const [deletingAddressKey, setDeletingAddressKey] = useState(null);
   const [addressError, setAddressError] = useState("");
+  const [showSupplementOrderModal, setShowSupplementOrderModal] = useState(false);
+  const [selectedShippingAddressKey, setSelectedShippingAddressKey] = useState("");
+  const [selectedShippingPhoneKey, setSelectedShippingPhoneKey] = useState("");
+  const [supplementProductOptions, setSupplementProductOptions] = useState([]);
+  const [supplementOrderTypeOptions, setSupplementOrderTypeOptions] = useState([]);
+  const [supplementOptionsLoading, setSupplementOptionsLoading] = useState(false);
+  const [supplementOptionsError, setSupplementOptionsError] = useState("");
+  const [selectedSupplementProduct, setSelectedSupplementProduct] = useState("");
+  const [selectedSupplementOrderType, setSelectedSupplementOrderType] = useState("");
+  const [selectedSupplementOrderTypeCost, setSelectedSupplementOrderTypeCost] = useState("");
+  const [supplementOrderSaveError, setSupplementOrderSaveError] = useState("");
+  const [supplementOrderSubmitting, setSupplementOrderSubmitting] = useState(false);
+  const [showSupplementOrderPayloadModal, setShowSupplementOrderPayloadModal] = useState(false);
+  const [supplementOrderPayloadPreview, setSupplementOrderPayloadPreview] = useState("");
   const [isPartnersSectionOpen, setIsPartnersSectionOpen] = useState(false);
   const [isEventsSectionOpen, setIsEventsSectionOpen] = useState(false);
   const [isAddressesSectionOpen, setIsAddressesSectionOpen] = useState(false);
@@ -1099,6 +1347,96 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
       setAddresses(Array.isArray(patient.addresses) ? patient.addresses : []);
     }
   }, [patient]);
+
+  useEffect(() => {
+    const firstAddressKey = getAddressRowKey(addresses[0]);
+    setSelectedShippingAddressKey(firstAddressKey ? String(firstAddressKey) : "");
+  }, [addresses]);
+
+  useEffect(() => {
+    const firstPhoneKey = getPhoneRowKey(phones[0]);
+    setSelectedShippingPhoneKey(firstPhoneKey ? String(firstPhoneKey) : "");
+  }, [phones]);
+
+  useEffect(() => {
+    if (!showSupplementOrderModal) return;
+
+    let cancelled = false;
+
+    const loadSupplementOptions = async () => {
+      setSupplementOptionsLoading(true);
+      setSupplementOptionsError("");
+
+      try {
+        const response = await apiRequest(`${INTEGRATION_OPTIONS_API}?integration_type_id=2`);
+        if (!response.ok) {
+          throw new Error(`Integration options request failed with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const options = Array.isArray(payload) ? payload : [];
+
+        if (cancelled) return;
+
+        setSupplementProductOptions(options);
+
+        if (options.length === 1) {
+          const selectedOptionValue = String(options[0]?.option_value || "").trim();
+          const orderTypeOptions = normalizeSupplementOrderTypeOptions(options[0]?.option_json);
+          setSelectedSupplementProduct(selectedOptionValue);
+          setSupplementOrderTypeOptions(orderTypeOptions);
+          setSelectedSupplementOrderType(orderTypeOptions[0]?.value || "");
+          setSelectedSupplementOrderTypeCost(orderTypeOptions[0]?.cost || "");
+        } else {
+          setSelectedSupplementProduct("");
+          setSupplementOrderTypeOptions([]);
+          setSelectedSupplementOrderType("");
+          setSelectedSupplementOrderTypeCost("");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setSupplementProductOptions([]);
+        setSupplementOrderTypeOptions([]);
+        setSelectedSupplementProduct("");
+        setSelectedSupplementOrderType("");
+        setSelectedSupplementOrderTypeCost("");
+        setSupplementOptionsError(error?.message || "Failed to load supplement options.");
+      } finally {
+        if (!cancelled) {
+          setSupplementOptionsLoading(false);
+        }
+      }
+    };
+
+    loadSupplementOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showSupplementOrderModal]);
+
+  useEffect(() => {
+    const selectedOption = supplementProductOptions.find(
+      (option) => String(option?.option_value || "").trim() === selectedSupplementProduct
+    );
+
+    const nextOrderTypeOptions = normalizeSupplementOrderTypeOptions(selectedOption?.option_json);
+    setSupplementOrderTypeOptions(nextOrderTypeOptions);
+    setSelectedSupplementOrderType((currentValue) => {
+      if (nextOrderTypeOptions.some((option) => option.value === currentValue)) {
+        return currentValue;
+      }
+      return nextOrderTypeOptions[0]?.value || "";
+    });
+  }, [selectedSupplementProduct, supplementProductOptions]);
+
+  useEffect(() => {
+    const selectedOrderTypeOption = supplementOrderTypeOptions.find(
+      (option) => option.value === selectedSupplementOrderType
+    );
+
+    setSelectedSupplementOrderTypeCost(selectedOrderTypeOption?.cost || "");
+  }, [selectedSupplementOrderType, supplementOrderTypeOptions]);
 
   useEffect(() => {
     setIsPhonesSectionOpen(true);
@@ -1805,6 +2143,177 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     return parsed.toLocaleDateString();
   };
 
+  const patientDisplayName = `${firstName || ""} ${lastName || ""}`.trim() || patientLabels.singular;
+
+  const formatShippingAddressLabel = (address) => {
+    if (!address) return "";
+
+    const lineOne = String(address?.street_1 || "").trim();
+    const lineTwo = String(address?.street_2 || "").trim();
+    const city = String(address?.city || "").trim();
+    const state = String(address?.st || "").trim();
+    const zip = String(address?.zip || "").trim();
+
+    const locality = [city, state].filter(Boolean).join(", ");
+    const tail = [locality, zip].filter(Boolean).join(" ");
+
+    return [lineOne, lineTwo, tail].filter(Boolean).join(" | ") || "Address";
+  };
+
+  const formatSupplementPhoneLabel = (phoneRow) => {
+    const phoneTypeDescription =
+      phoneRow?.phone_type?.description ||
+      phoneTypes.find(
+        (phoneType) =>
+          Number(phoneType.phone_type_id) ===
+          Number(phoneRow?.phone_type?.phone_type_id ?? phoneRow?.phone_type_id)
+      )?.description ||
+      "Phone";
+
+    return `${phoneTypeDescription}: ${formatPhoneForInput(phoneRow?.phone) || "—"}`;
+  };
+
+  const handleOrderSupplementNow = async () => {
+    setSupplementOrderSaveError("");
+
+    const selectedAddress = addresses.find(
+      (address) => String(getAddressRowKey(address) || "") === selectedShippingAddressKey
+    );
+    const selectedPhone = phones.find(
+      (phoneRow) => String(getPhoneRowKey(phoneRow) || "") === selectedShippingPhoneKey
+    );
+    const selectedProductOption = supplementProductOptions.find(
+      (option) => String(option?.option_value || "").trim() === selectedSupplementProduct
+    );
+    const selectedOrderTypeOption = supplementOrderTypeOptions.find(
+      (option) => option.value === selectedSupplementOrderType
+    );
+
+    const phoneDigits = normalizePhoneDigits(selectedPhone?.phone);
+    const numericCost = Number.parseFloat(selectedOrderTypeOption?.cost ?? selectedSupplementOrderTypeCost ?? "0");
+    const formattedCost = Number.isFinite(numericCost) ? numericCost.toFixed(2) : "0.00";
+    const persistedAddressId = getPersistedAddressId(selectedAddress);
+    const persistedPhoneId = getPersistedPhoneId(selectedPhone);
+    const orderedByUserId = Number(getSessionUserId());
+
+    if (!persistedAddressId || !persistedPhoneId || !Number.isFinite(orderedByUserId) || orderedByUserId <= 0) {
+      setSupplementOrderSaveError("A saved address, saved phone, and logged-in user are required before ordering.");
+      return;
+    }
+
+    const orderPayload = {
+      order: {
+        email: email || "",
+        phone_number: phoneDigits,
+        financial_status: "paid",
+        send_receipt: false,
+        send_fulfillment_receipt: false,
+        line_items: [
+          {
+              "variant_id": 51938545991997,
+              "quantity": 1
+          },
+        ],
+        customer: {
+          first_name: firstName || "",
+          last_name: lastName || "",
+          email: email || "",
+          phone_number: phoneDigits,
+        },
+        shipping_address: {
+          first_name: firstName || "",
+          last_name: lastName || "",
+          address1: selectedAddress?.street_1 || "",
+          address2: selectedAddress?.street_2 || "",
+          city: selectedAddress?.city || "",
+          province_code: selectedAddress?.st || "",
+          country_code: getCountryCodeFromValue(selectedAddress?.country),
+          zip: selectedAddress?.zip || "",
+          phone_number: phoneDigits,
+        },
+        tags: "valhalla",
+        note_attributes: [
+          {
+            name: "patient_id",
+            value: patient?.patient_id ?? "",
+          },
+          {
+            name: "subscription_type",
+            value: selectedSupplementOrderType,
+          },
+          {
+            name: "source",
+            value: "valhalla",
+          },
+        ],
+      },
+      meta_data: {
+        product: selectedSupplementProduct,
+        order_type: selectedSupplementOrderType,
+        order_date: new Date().toISOString(),
+        cost: Number(formattedCost),
+        comments: "",
+        result: {},
+        ordered_by: orderedByUserId,
+        patient: patient?.patient_id ?? null,
+        patient_address: persistedAddressId,
+        patient_phone: persistedPhoneId,
+      },
+    };
+
+    const requestHeaders = {
+      "Content-Type": "application/json",
+    };
+
+    setSupplementOrderSubmitting(true);
+
+    try {
+      const response = await apiRequest(BODYIQ_SEND_ORDER_API, {
+        method: "POST",
+        headers: requestHeaders,
+        body: JSON.stringify(orderPayload),
+      });
+
+      const responseBody = await readApiResponseBody(response);
+
+      setSupplementOrderPayloadPreview(
+        JSON.stringify(
+          {
+            request_url: BODYIQ_SEND_ORDER_API,
+            headers: requestHeaders,
+            request_body: orderPayload,
+            response_status_code: response.status,
+            response_body: responseBody,
+          },
+          null,
+          2
+        )
+      );
+      setShowSupplementOrderPayloadModal(true);
+
+      if (!response.ok) {
+        setSupplementOrderSaveError(`Supplement order request failed with status ${response.status}`);
+      }
+    } catch (error) {
+      setSupplementOrderSaveError(error?.message || "Failed to submit supplement order.");
+      setSupplementOrderPayloadPreview(
+        JSON.stringify(
+          {
+            request_url: BODYIQ_SEND_ORDER_API,
+            headers: requestHeaders,
+            request_body: orderPayload,
+            error: error?.message || "Failed to submit supplement order.",
+          },
+          null,
+          2
+        )
+      );
+      setShowSupplementOrderPayloadModal(true);
+    } finally {
+      setSupplementOrderSubmitting(false);
+    }
+  };
+
   return (
     <div className="modal-overlay">
       <div className="modal modern patient-modal">
@@ -1914,6 +2423,16 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                     </span>
                   )}
                 </div>
+              </div>
+
+              <div className="patient-profile-order-row">
+                <button
+                  type="button"
+                  className="user-address-add-btn"
+                  onClick={() => setShowSupplementOrderModal(true)}
+                >
+                  Order Valhalla Supplements
+                </button>
               </div>
             </div>
           </div>
@@ -2449,6 +2968,222 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                 </button>
                 <button className="primary" onClick={handleConfirmDeleteAddress}>
                   Yes, Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSupplementOrderModal && (
+          <div className="modal-overlay" style={{ zIndex: 1360 }}>
+            <div className="modal modern supplement-order-modal">
+              <div className="modal-header supplement-order-modal-header">
+                <div className="supplement-order-title-block">
+                  <span className="supplement-order-title-eyebrow">Valhalla Supplements</span>
+                  <h3>{`Order Supplements for ${patientDisplayName}`}</h3>
+                </div>
+                <button className="icon-close" onClick={() => setShowSupplementOrderModal(false)}>✕</button>
+              </div>
+
+              <div className="supplement-order-layout">
+                <section className="supplement-order-card supplement-order-card-patient">
+                  <div className="supplement-order-card-header">
+                    <h4>Patient Information</h4>
+                    <p>Confirm the shipping contact details for this order.</p>
+                  </div>
+
+                  <div className="supplement-order-card-fields">
+                    <div className="supplement-order-field supplement-order-field-full">
+                      <Detail label="Shipping Address">
+                        <select
+                          value={selectedShippingAddressKey}
+                          onChange={(e) => setSelectedShippingAddressKey(e.target.value)}
+                        >
+                          {addresses.length === 0 ? (
+                            <option value="">No addresses available</option>
+                          ) : (
+                            addresses.map((address) => {
+                              const addressKey = getAddressRowKey(address);
+                              if (!addressKey) return null;
+
+                              return (
+                                <option key={addressKey} value={String(addressKey)}>
+                                  {formatShippingAddressLabel(address)}
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                      </Detail>
+                    </div>
+
+                    <div className="supplement-order-field supplement-order-field-full">
+                      <Detail label="Phone">
+                        <select
+                          value={selectedShippingPhoneKey}
+                          onChange={(e) => setSelectedShippingPhoneKey(e.target.value)}
+                        >
+                          {phones.length === 0 ? (
+                            <option value="">No phone numbers available</option>
+                          ) : (
+                            phones.map((phoneRow) => {
+                              const phoneKey = getPhoneRowKey(phoneRow);
+                              if (!phoneKey) return null;
+
+                              return (
+                                <option key={phoneKey} value={String(phoneKey)}>
+                                  {formatSupplementPhoneLabel(phoneRow)}
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                      </Detail>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="supplement-order-card supplement-order-card-product">
+                  <div className="supplement-order-card-header">
+                    <h4>Product Information</h4>
+                    <p>Choose the suppliment product and order type.</p>
+                  </div>
+
+                  <div className="supplement-order-card-fields">
+                    <div className="supplement-order-field supplement-order-field-full">
+                      <Detail label="Product">
+                        <select
+                          value={selectedSupplementProduct}
+                          onChange={(e) => setSelectedSupplementProduct(e.target.value)}
+                          disabled={supplementOptionsLoading || supplementProductOptions.length === 0}
+                        >
+                          <option value="">
+                            {supplementOptionsLoading
+                              ? "Loading products..."
+                              : supplementProductOptions.length === 0
+                                ? "No products available"
+                                : "Select product"}
+                          </option>
+                          {supplementProductOptions.map((option) => {
+                            const optionValue = String(option?.option_value || "").trim();
+                            if (!optionValue) return null;
+
+                            return (
+                              <option key={optionValue} value={optionValue}>
+                                {String(option?.option || "").trim() || optionValue}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </Detail>
+                    </div>
+
+                    <div className="supplement-order-field supplement-order-field-full">
+                      <Detail label="Order Type">
+                        <select
+                          value={selectedSupplementOrderType}
+                          onChange={(e) => setSelectedSupplementOrderType(e.target.value)}
+                          disabled={
+                            supplementOptionsLoading ||
+                            !selectedSupplementProduct ||
+                            supplementOrderTypeOptions.length === 0
+                          }
+                        >
+                          <option value="">
+                            {selectedSupplementProduct
+                              ? supplementOrderTypeOptions.length === 0
+                                ? "No order types available"
+                                : "Select order type"
+                              : "Select product first"}
+                          </option>
+                          {supplementOrderTypeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.description}
+                            </option>
+                          ))}
+                        </select>
+                      </Detail>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="modal-actions">
+                {(supplementOptionsError || supplementOrderSaveError) && (
+                  <p style={{ color: "#dc2626", marginRight: "auto" }}>
+                    {supplementOptionsError || supplementOrderSaveError}
+                  </p>
+                )}
+                <button onClick={() => setShowSupplementOrderModal(false)}>Cancel</button>
+                <button
+                  className="primary"
+                  onClick={handleOrderSupplementNow}
+                  disabled={
+                    supplementOrderSubmitting ||
+                    addresses.length === 0 ||
+                    !selectedShippingAddressKey ||
+                    phones.length === 0 ||
+                    !selectedShippingPhoneKey ||
+                    !selectedSupplementProduct ||
+                    !selectedSupplementOrderType
+                  }
+                >
+                  {supplementOrderSubmitting ? "Ordering..." : "Order Now"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSupplementOrderPayloadModal && (
+          <div className="modal-overlay" style={{ zIndex: 1370 }}>
+            <div className="modal modern" style={{ width: "min(900px, 92vw)" }}>
+              <div className="modal-header">
+                <h3>Supplement Order Request / Response</h3>
+                <button
+                  className="icon-close"
+                  onClick={() => {
+                    setShowSupplementOrderPayloadModal(false);
+                    setShowSupplementOrderModal(false);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div
+                style={{
+                  maxHeight: "70vh",
+                  overflow: "auto",
+                  background: "#0f172a",
+                  color: "#e2e8f0",
+                  borderRadius: "14px",
+                  padding: "18px",
+                  border: "1px solid rgba(148, 163, 184, 0.25)",
+                }}
+              >
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    fontSize: "13px",
+                    lineHeight: 1.55,
+                    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+                  }}
+                >
+                  {supplementOrderPayloadPreview}
+                </pre>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  onClick={() => {
+                    setShowSupplementOrderPayloadModal(false);
+                    setShowSupplementOrderModal(false);
+                  }}
+                >
+                  Close
                 </button>
               </div>
             </div>
@@ -3927,10 +4662,12 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
   const [selectedReportFields, setSelectedReportFields] = useState(null);
-  const [selectedReportResponses, setSelectedReportResponses] = useState([]);
-  const [loadingReportAttemptId, setLoadingReportAttemptId] = useState(null);
+  const [selectedReportHtml, setSelectedReportHtml] = useState("");
+  const [loadingGeneratedPreview, setLoadingGeneratedPreview] = useState(null);
+  const [selectedGeneratedPreviewType, setSelectedGeneratedPreviewType] = useState("report");
   const [isDownloadingGeneratedReport, setIsDownloadingGeneratedReport] = useState(false);
   const generatedReportRef = useRef(null);
+  const generatedReportIframeRef = useRef(null);
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
@@ -3952,30 +4689,219 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   }, [assessmentAppBaseUrl]);
 
   const handleDownloadGeneratedReportPdf = useCallback(async () => {
-    const reportElement = generatedReportRef.current;
+    const isInvoicePreview = selectedGeneratedPreviewType === "invoice";
+    const reportDocument = generatedReportIframeRef.current?.contentDocument;
+    const reportElement = isInvoicePreview
+      ? generatedReportRef.current
+      : reportDocument?.body?.firstElementChild ?? reportDocument?.body;
+
     if (!reportElement || isDownloadingGeneratedReport) return;
 
     setIsDownloadingGeneratedReport(true);
 
     try {
+      const pageBackgroundRgb = getPdfPageBackgroundRgb(reportElement);
+      const reportBackgroundColor = `rgb(${pageBackgroundRgb.r}, ${pageBackgroundRgb.g}, ${pageBackgroundRgb.b})`;
+      const captureWidth = Math.ceil(
+        Math.max(
+          reportElement.scrollWidth || 0,
+          reportElement.clientWidth || 0,
+          reportElement.getBoundingClientRect().width || 0
+        )
+      );
+      const captureHeight = Math.ceil(
+        Math.max(
+          reportElement.scrollHeight || 0,
+          reportElement.clientHeight || 0,
+          reportElement.getBoundingClientRect().height || 0
+        )
+      );
+
       const canvas = await html2canvas(reportElement, {
         scale: 1.5,
         useCORS: true,
-        backgroundColor: "#0b1220",
+        backgroundColor: reportBackgroundColor,
         logging: false,
-        windowWidth: reportElement.scrollWidth,
-        windowHeight: reportElement.scrollHeight,
+        width: captureWidth,
+        height: captureHeight,
+        windowWidth: captureWidth,
+        windowHeight: captureHeight,
       });
 
-      const basePdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageWidth = basePdf.internal.pageSize.getWidth();
-      const renderedHeightMm = (canvas.height / canvas.width) * pageWidth;
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageWidth, renderedHeightMm] });
-      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      const pageMarginMm = 12.7;
+      const bottomPageMarginMm = 12.7;
+      const topPageMarginMm = pageMarginMm;
+      const sidePageMarginMm = pageMarginMm;
 
-      pdf.setFillColor(11, 18, 32);
-      pdf.rect(0, 0, pageWidth, renderedHeightMm, "F");
-      pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, renderedHeightMm);
+      const paginationHints = isInvoicePreview
+        ? { forcedBreaks: [], avoidRegions: [], preferredBreaks: [] }
+        : getPdfPaginationHints(reportElement);
+      const hintScaleFactor = isInvoicePreview
+        ? 1
+        : canvas.width / Math.max(1, reportElement.scrollWidth || reportElement.clientWidth || canvas.width);
+      const scaledPaginationHints = {
+        forcedBreaks: paginationHints.forcedBreaks.map((value) => Math.round(value * hintScaleFactor)),
+        avoidRegions: paginationHints.avoidRegions.map((region) => ({
+          top: Math.round(region.top * hintScaleFactor),
+          bottom: Math.round(region.bottom * hintScaleFactor),
+          height: Math.round(region.height * hintScaleFactor),
+          preferTopBreak: Boolean(region.preferTopBreak),
+        })),
+        preferredBreaks: paginationHints.preferredBreaks.map((value) => Math.round(value * hintScaleFactor)),
+      };
+
+      let pdf;
+
+      if (!isInvoicePreview) {
+        pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const contentWidth = pageWidth - sidePageMarginMm * 2;
+        const pageContentHeight = pageHeight - topPageMarginMm - bottomPageMarginMm;
+        const footerDisclaimer = "This report contains patient self-reported symptom data only. It does not constitute a medical diagnosis or treatment recommendation. All data submitted for licensed physician review.";
+
+        const pageSlices = [];
+        let currentTop = 0;
+
+        while (currentTop < canvas.height) {
+          const currentPageTop = currentTop;
+          const minimumBreakTop = currentPageTop + 40;
+          const pageContentHeightPx = Math.floor((canvas.width * pageContentHeight) / contentWidth);
+          const remainingHeight = canvas.height - currentPageTop;
+          if (remainingHeight <= pageContentHeightPx) {
+            pageSlices.push({
+              top: currentPageTop,
+              height: remainingHeight,
+              offsetTopMm: topPageMarginMm,
+            });
+            break;
+          }
+
+          const nominalBottom = currentPageTop + pageContentHeightPx;
+          const forcedBreak = scaledPaginationHints.forcedBreaks.find(
+            (candidate) => candidate > minimumBreakTop && candidate < nominalBottom
+          );
+
+          let nextBottom = forcedBreak || nominalBottom;
+          const intersectingAvoidRegion = scaledPaginationHints.avoidRegions.find(
+            (region) => region.top < nextBottom && region.bottom > nextBottom
+          );
+
+          if (intersectingAvoidRegion) {
+            const shouldPreferRegionTop =
+              intersectingAvoidRegion.preferTopBreak &&
+              intersectingAvoidRegion.top > minimumBreakTop;
+
+            const preferredBreakWithinRegion = shouldPreferRegionTop
+              ? null
+              : scaledPaginationHints.preferredBreaks
+                  .filter(
+                    (candidate) =>
+                      candidate > Math.max(minimumBreakTop, intersectingAvoidRegion.top) &&
+                      candidate < nominalBottom
+                  )
+                  .pop();
+
+            if (shouldPreferRegionTop) {
+              nextBottom = intersectingAvoidRegion.top;
+            } else if (preferredBreakWithinRegion) {
+              nextBottom = preferredBreakWithinRegion;
+            }
+
+            const canMoveUp =
+              intersectingAvoidRegion.top - currentPageTop > pageContentHeightPx * 0.45;
+            if (!shouldPreferRegionTop && !preferredBreakWithinRegion && canMoveUp) {
+              nextBottom = intersectingAvoidRegion.top;
+            }
+          }
+
+          if (nextBottom - currentPageTop < 40) {
+            nextBottom = nominalBottom;
+          }
+
+          pageSlices.push({
+            top: currentPageTop,
+            height: nextBottom - currentPageTop,
+            offsetTopMm: topPageMarginMm,
+          });
+          currentTop = nextBottom;
+        }
+
+        pageSlices.forEach((pageSlice, pageIndex) => {
+          const pageCanvas = document.createElement("canvas");
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = pageSlice.height;
+
+          const pageContext = pageCanvas.getContext("2d");
+          if (!pageContext) {
+            throw new Error("Failed to create PDF page canvas context.");
+          }
+
+          pageContext.fillStyle = "#ffffff";
+          pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          pageContext.drawImage(
+            canvas,
+            0,
+            pageSlice.top,
+            canvas.width,
+            pageSlice.height,
+            0,
+            0,
+            canvas.width,
+            pageSlice.height
+          );
+
+          const pageImageData = pageCanvas.toDataURL("image/jpeg", 0.92);
+          const renderedSliceHeightMm = (pageSlice.height / canvas.width) * contentWidth;
+
+          if (pageIndex > 0) {
+            pdf.addPage();
+          }
+
+          pdf.setFillColor(pageBackgroundRgb.r, pageBackgroundRgb.g, pageBackgroundRgb.b);
+          pdf.rect(0, 0, pageWidth, pageHeight, "F");
+
+          pdf.addImage(
+            pageImageData,
+            "JPEG",
+            sidePageMarginMm,
+            pageSlice.offsetTopMm,
+            contentWidth,
+            renderedSliceHeightMm
+          );
+
+          pdf.setTextColor(71, 85, 105);
+          pdf.setFontSize(5.5);
+          const footerDisclaimerLines = pdf.splitTextToSize(
+            footerDisclaimer,
+            pageWidth - sidePageMarginMm * 2
+          );
+          const footerRegionTop = pageHeight - bottomPageMarginMm + 1.0;
+          const footerLineHeightMm = 2.15;
+          const footerGapMm = 1.6;
+          const footerTextY = footerRegionTop;
+          const footerPageNumberY =
+            footerTextY +
+            footerDisclaimerLines.length * footerLineHeightMm +
+            footerGapMm;
+          pdf.text(footerDisclaimerLines, pageWidth / 2, footerTextY, {
+            align: "center",
+            baseline: "top",
+          });
+          pdf.setFontSize(6);
+          pdf.text(`Page ${pageIndex + 1} of ${pageSlices.length}`, pageWidth / 2, footerPageNumberY, {
+            align: "center",
+            baseline: "top",
+          });
+        });
+      } else {
+        const basePdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+        const pageWidth = basePdf.internal.pageSize.getWidth();
+        const renderedHeightMm = (canvas.height / canvas.width) * pageWidth;
+        pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageWidth, renderedHeightMm] });
+        const imgData = canvas.toDataURL("image/jpeg", 0.92);
+        pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, renderedHeightMm);
+      }
 
       const reportAssessmentId = getAttemptAssessmentId(selectedReportAttempt);
       const reportAssessmentName =
@@ -3984,10 +4910,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
         `Assessment #${reportAssessmentId || "—"}`;
 
       const assessmentName =
-        String(reportAssessmentName || "CognitrackX_Report")
+        String(
+          reportAssessmentName ||
+            (isInvoicePreview ? "CognitrackX_Invoice" : "CognitrackX_Report")
+        )
           .trim()
           .replace(/\s+/g, "_")
-          .replace(/[^a-zA-Z0-9_-]/g, "") || "CognitrackX_Report";
+          .replace(/[^a-zA-Z0-9_-]/g, "") ||
+        (isInvoicePreview ? "CognitrackX_Invoice" : "CognitrackX_Report");
       const reportPatientName = `${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim();
       const patientFileName =
         String(reportPatientName || patient?.email || "Patient")
@@ -3996,13 +4926,21 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
           .replace(/[^a-zA-Z0-9_-]/g, "") || "Patient";
       const dateStamp = new Date().toISOString().slice(0, 10);
 
-      pdf.save(`${assessmentName}_${patientFileName}_${dateStamp}.pdf`);
+      const documentLabel = isInvoicePreview ? "Invoice" : "Report";
+      pdf.save(`${assessmentName}_${documentLabel}_${patientFileName}_${dateStamp}.pdf`);
     } catch (error) {
       console.error("Failed to download generated report PDF", error);
     } finally {
       setIsDownloadingGeneratedReport(false);
     }
-  }, [isDownloadingGeneratedReport, patient?.email, patient?.first_name, patient?.last_name, selectedReportAttempt]);
+  }, [
+    isDownloadingGeneratedReport,
+    patient?.email,
+    patient?.first_name,
+    patient?.last_name,
+    selectedGeneratedPreviewType,
+    selectedReportAttempt,
+  ]);
 
   const sendAssessmentLinkEmail = useCallback(async ({ recipientEmail, assessmentLink }) => {
     const trimmedRecipientEmail = String(recipientEmail || "").trim();
@@ -4356,14 +5294,14 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     };
   }, [isEventDropdownOpen]);
 
-  const getAssessmentName = (attempt) => {
+  const getAssessmentName = useCallback((attempt) => {
     const attemptName = attempt.assessment?.name ?? attempt.assessment_name;
     if (attemptName) return attemptName;
 
     const assessmentId = getAttemptAssessmentId(attempt);
     const found = assessments.find((a) => Number(a.assessment_id) === assessmentId);
     return found?.name ?? `Assessment #${assessmentId || "—"}`;
-  };
+  }, [assessments]);
 
   const getAttemptFeedbackKey = (attempt) => {
     const attemptId = getAttemptId(attempt);
@@ -4484,56 +5422,6 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       });
     }
   }, [fetchAttemptProgressByAttemptId]);
-
-  const fetchResponsesForAttempt = useCallback(async (attemptId) => {
-    const normalizedAttemptId = Number(attemptId);
-    if (!Number.isFinite(normalizedAttemptId) || normalizedAttemptId <= 0) {
-      return [];
-    }
-
-    const responseQueryPaths = [
-      `${PATIENT_RESPONSES_HISTORY_API}?assessment_attempt_id=${normalizedAttemptId}`,
-      `${PATIENT_RESPONSES_API}?attempt_id=${normalizedAttemptId}`,
-      `${PATIENT_RESPONSES_API}?assessment_attempt_id=${normalizedAttemptId}`,
-      `${PATIENT_RESPONSES_API}?attempt=${normalizedAttemptId}`,
-      `${PATIENT_RESPONSES_API}?patient_assessment_attempt_id=${normalizedAttemptId}`,
-    ];
-
-    for (const responsePath of responseQueryPaths) {
-      try {
-        const response = await apiRequest(responsePath);
-        if (!response.ok) continue;
-
-        const payload = await response.json();
-        const rows = normalizeApiRows(payload);
-        const matchingRows = rows.filter(
-          (responseItem) => getResponseAttemptId(responseItem) === normalizedAttemptId
-        );
-        const rowsWithKnownAttemptIds = rows.filter(
-          (responseItem) => getResponseAttemptId(responseItem) > 0
-        );
-        const hasMismatchedAttemptIds = rowsWithKnownAttemptIds.some(
-          (responseItem) => getResponseAttemptId(responseItem) !== normalizedAttemptId
-        );
-
-        if (matchingRows.length > 0) {
-          return matchingRows;
-        }
-
-        if (rows.length > 0 && !hasMismatchedAttemptIds) {
-          return rows;
-        }
-      } catch {
-        // Try the next endpoint variant.
-      }
-    }
-
-    const fallbackResponse = await apiRequest(PATIENT_RESPONSES_API);
-    const fallbackPayload = await fallbackResponse.json();
-    return normalizeApiRows(fallbackPayload).filter(
-      (responseItem) => getResponseAttemptId(responseItem) === normalizedAttemptId
-    );
-  }, []);
 
   const fetchResponseHistoryForAttempt = useCallback(async (attemptId) => {
     const normalizedAttemptId = Number(attemptId);
@@ -5007,13 +5895,15 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     onClose();
   };
 
+  const patientName = `${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim();
+
   const handleOpenGeneratedReport = async (attempt, matchedEvent) => {
     const attemptId = Number(getAttemptId(attempt));
     if (!Number.isFinite(attemptId) || attemptId <= 0) {
       return;
     }
 
-    setLoadingReportAttemptId(attemptId);
+    setLoadingGeneratedPreview({ attemptId, type: "report" });
 
     const reportFields = {
       fullName: patientName || patient?.email || "",
@@ -5029,19 +5919,72 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     };
 
     try {
-      const responses = await fetchResponsesForAttempt(attemptId);
+      const reportResponse = await apiRequest(COGNITRACKX_REPORT_HTML_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_assessment_attempt_id: attemptId,
+        }),
+      });
+
+      if (!reportResponse.ok) {
+        const errorMessage = await getResponseErrorMessage(reportResponse);
+        throw new Error(`Report request failed: ${errorMessage}`);
+      }
+
+      const reportPayload = await reportResponse.json().catch(() => null);
+      const reportHtml = String(reportPayload?.html ?? "").trim();
+
+      if (!reportHtml) {
+        throw new Error("Report response did not include html.");
+      }
+
+      setSelectedGeneratedPreviewType("report");
       setSelectedReportAttempt(attempt);
       setSelectedReportFields(reportFields);
-      setSelectedReportResponses(responses);
+      setSelectedReportHtml(reportHtml);
       setShowGeneratedReportModal(true);
     } catch (error) {
-      console.error("Failed to load report responses", error);
+      console.error("Failed to load generated report HTML", error);
     } finally {
-      setLoadingReportAttemptId(null);
+      setLoadingGeneratedPreview(null);
     }
   };
 
-  const patientName = `${patient?.first_name ?? ""} ${patient?.last_name ?? ""}`.trim();
+  const handleOpenGeneratedInvoice = useCallback(async (attempt) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) {
+      return;
+    }
+
+    setLoadingGeneratedPreview({ attemptId, type: "invoice" });
+
+    const invoiceFields = {
+      assessmentName: getAssessmentName(attempt),
+      fullName: patientName || patient?.email || "",
+      companyName: primaryCompanyName,
+      invoiceNumber: attemptId,
+      assessmentDate:
+        attempt?.completed_at ??
+        attempt?.completedAt ??
+        attempt?.completed_on ??
+        attempt?.started_at ??
+        attempt?.startedAt ??
+        attempt?.updated_at ??
+        new Date().toISOString(),
+    };
+
+    try {
+      setSelectedGeneratedPreviewType("invoice");
+      setSelectedReportAttempt(attempt);
+      setSelectedReportFields(invoiceFields);
+      setSelectedReportHtml("");
+      setShowGeneratedReportModal(true);
+    } finally {
+      setLoadingGeneratedPreview(null);
+    }
+  }, [getAssessmentName, patient?.email, patientName, primaryCompanyName]);
+
   const selectedEventNumericId = Number(selectedPatientEventId);
   const selectedEvent = patientEvents.find(
     (eventItem) => Number(getPatientEventId(eventItem)) === selectedEventNumericId
@@ -5293,10 +6236,32 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                               <button
                                 type="button"
                                 className="assessments-action-btn"
-                                onClick={() => handleOpenGeneratedReport(attempt, matchedEvent)}
-                                disabled={loadingReportAttemptId === attemptId}
+                                onClick={() => handleOpenGeneratedInvoice(attempt)}
+                                disabled={
+                                  loadingGeneratedPreview?.attemptId === attemptId &&
+                                  loadingGeneratedPreview?.type === "invoice"
+                                }
                               >
-                                {loadingReportAttemptId === attemptId ? "Generating..." : "Generate Report"}
+                                {loadingGeneratedPreview?.attemptId === attemptId &&
+                                loadingGeneratedPreview?.type === "invoice"
+                                  ? "Generating..."
+                                  : "Generate Invoice"}
+                              </button>
+                            )}
+                            {isCompleted && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                onClick={() => handleOpenGeneratedReport(attempt, matchedEvent)}
+                                disabled={
+                                  loadingGeneratedPreview?.attemptId === attemptId &&
+                                  loadingGeneratedPreview?.type === "report"
+                                }
+                              >
+                                {loadingGeneratedPreview?.attemptId === attemptId &&
+                                loadingGeneratedPreview?.type === "report"
+                                  ? "Generating..."
+                                  : "Generate Report"}
                               </button>
                             )}
                             <button
@@ -5394,7 +6359,9 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 800, color: "#0f172a" }}>Generated Report</div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                    {selectedGeneratedPreviewType === "invoice" ? "Generated Invoice" : "Generated Report"}
+                  </div>
                   <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
                     {`${getAssessmentName(selectedReportAttempt)} - ${patientName || patient?.email || "Patient"}`}
                   </div>
@@ -5420,7 +6387,8 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                       setShowGeneratedReportModal(false);
                       setSelectedReportAttempt(null);
                       setSelectedReportFields(null);
-                      setSelectedReportResponses([]);
+                      setSelectedReportHtml("");
+                      setSelectedGeneratedPreviewType("report");
                     }}
                     style={{
                       background: "#fff",
@@ -5437,13 +6405,36 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                 </div>
               </div>
               <div style={{ flex: 1, overflow: "auto" }}>
-                <div ref={generatedReportRef}>
-                  <CognitrackXReport
-                    assessmentName={getAssessmentName(selectedReportAttempt)}
-                    reportFields={selectedReportFields}
-                    reportAttempt={selectedReportAttempt}
-                    assessmentResponses={selectedReportResponses}
-                  />
+                <div
+                  ref={generatedReportRef}
+                  style={
+                    selectedGeneratedPreviewType === "invoice"
+                      ? { display: "table", margin: "0 auto", background: "#ffffff" }
+                      : { height: "100%" }
+                  }
+                >
+                  {selectedGeneratedPreviewType === "invoice" ? (
+                    <CognitrackXInvoice
+                      assessmentName={selectedReportFields?.assessmentName}
+                      patientName={selectedReportFields?.fullName}
+                      companyName={selectedReportFields?.companyName}
+                      invoiceNumber={selectedReportFields?.invoiceNumber}
+                      assessmentDate={selectedReportFields?.assessmentDate}
+                    />
+                  ) : (
+                    <iframe
+                      ref={generatedReportIframeRef}
+                      title="Generated report preview"
+                      srcDoc={selectedReportHtml}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        minHeight: "calc(92vh - 120px)",
+                        border: 0,
+                        background: "#ffffff",
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>

@@ -20,28 +20,28 @@ const PATIENTS_VIEW_API_URL = `${API_BASE}/api/patients-view/`;
 const FILEVINE_INTEGRATION_TEST_API_BASE = `${API_BASE}/api/integrations/filevine/`;
 const COGNITRACKX_REPORT_EXAMPLE_DOCUMENT_LINK_API = `${API_BASE}/api/document-download/get-link/cognitrackx_report/example/`;
 const FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/`;
+const FILEVINE_UPLOAD_DOCUMENT_BY_FOLDER_NAME_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/folder-name/`;
 const FILEVINE_UPLOAD_DOCUMENT_ADD_PROJECT_HASHTAG_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/filevine/upload-document/add-project-hashtag/`;
 const BODYIQ_SEND_ORDER_INTEGRATION_TEST_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
 
 const DEFAULT_BODY_IQ_ORDER_DATA = JSON.stringify({
   order: {
     email: "patient@example.com",
-    phone: "5551234567",
+    phone_number: "5551234567",
     financial_status: "paid",
     send_receipt: false,
     send_fulfillment_receipt: false,
     line_items: [
       {
-        sku: "VH-BRAIN-CITRUS",
+        variant_id: 51938545991997,
         quantity: 1,
-        price: "72.00",
       },
     ],
     customer: {
       first_name: "First",
       last_name: "Last",
       email: "patient@example.com",
-      phone: "5551234567",
+      phone_number: "5551234567",
     },
     shipping_address: {
       first_name: "First",
@@ -54,7 +54,7 @@ const DEFAULT_BODY_IQ_ORDER_DATA = JSON.stringify({
       zip: "84101",
       phone: "5551234567",
     },
-    tags: "test-do-not-fulfill",
+    tags: "valhalla",
     note_attributes: [
       { name: "patient_id", value: "1000" },
       { name: "subscription_type", value: "30_day" },
@@ -738,6 +738,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
   const [selectedReportUploadPatientId, setSelectedReportUploadPatientId] = useState("");
   const [documentFolderId, setDocumentFolderId] = useState("");
   const [reportUploadProjectId, setReportUploadProjectId] = useState("");
+  const [reportUploadFolderName, setReportUploadFolderName] = useState("");
   const [reportUploadHashtag, setReportUploadHashtag] = useState("");
   const [documentFolderLoading, setDocumentFolderLoading] = useState(false);
   const [reportUploadRequestJson, setReportUploadRequestJson] = useState("");
@@ -785,6 +786,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
       setSelectedReportUploadPatientId("");
       setDocumentFolderId("");
       setReportUploadProjectId("");
+      setReportUploadFolderName("");
       setReportUploadHashtag("");
       setDocumentFolderLoading(false);
       setReportUploadRequestJson("");
@@ -1148,6 +1150,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setReportUploadProjectId("");
+    setReportUploadFolderName("");
     setReportUploadHashtag("");
     setReportUploadRequestJson("");
     setBodyIqSelectedCompanyId("");
@@ -1211,6 +1214,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     setSelectedReportUploadPatientId("");
     setDocumentFolderId("");
     setReportUploadProjectId("");
+    setReportUploadFolderName("");
     setReportUploadHashtag("");
     setDocumentFolderLoading(false);
     setReportUploadRequestJson("");
@@ -1417,6 +1421,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
   const handleRunReportUploadTest = async () => {
     if (
       !isDocumentUploadIntegrationTest &&
+      !isDocumentUploadByNameIntegrationTest &&
       !isDocumentUploadAddHashtagIntegrationTest &&
       !isProjectDataDownloadIntegrationTest &&
       !isFileVineFullPostIntegrationTest &&
@@ -1429,6 +1434,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
     let bodyIqRequestHeaders = null;
     let bodyIqResponseStatusCode = null;
     let bodyIqRequestBody = null;
+    let bodyIqResponseBody = null;
 
     setReportUploadError("");
     setReportUploadSubmitting(true);
@@ -1452,7 +1458,6 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
         } catch {
           throw new Error("Order Data must be valid JSON.");
         }
-
         bodyIqRequestBody = parsedOrderData;
 
         const bodyIqResponse = await apiRequest(bodyIqRequestUrl, {
@@ -1463,7 +1468,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
         bodyIqResponseStatusCode = bodyIqResponse.status;
 
         const bodyIqContentType = bodyIqResponse.headers.get("content-type") || "";
-        const bodyIqResponsePayload = bodyIqContentType.includes("application/json")
+        bodyIqResponseBody = bodyIqContentType.includes("application/json")
           ? await bodyIqResponse.json().catch(() => null)
           : await bodyIqResponse.text().catch(() => "");
 
@@ -1472,7 +1477,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
           headers: bodyIqRequestHeaders,
           request_body: bodyIqRequestBody,
           response_status_code: bodyIqResponseStatusCode,
-          response_body: bodyIqResponsePayload,
+          response_body: bodyIqResponseBody,
         }, null, 2));
         setShowReportUploadPreviewDialog(true);
 
@@ -1483,13 +1488,18 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
         return;
       }
 
-      if (isDocumentUploadIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) {
+      if (isDocumentUploadIntegrationTest || isDocumentUploadByNameIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) {
         const trimmedDocumentFolderId = String(documentFolderId || "").trim();
         const trimmedProjectId = String(reportUploadProjectId || "").trim();
+        const trimmedFolderName = String(reportUploadFolderName || "").trim();
         const trimmedHashtag = String(reportUploadHashtag || "").trim();
 
-        if (!trimmedDocumentFolderId) {
+        if (isDocumentUploadIntegrationTest && !trimmedDocumentFolderId) {
           throw new Error("Document Folder ID is required before running the document upload test.");
+        }
+
+        if (isDocumentUploadByNameIntegrationTest && !trimmedFolderName) {
+          throw new Error("Folder Name is required before running the document upload by name test.");
         }
 
         if (!trimmedProjectId) {
@@ -1520,13 +1530,17 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
         const uploadPayload = {
           document_url: documentUrl,
           project_id: trimmedProjectId,
-          folder_id: trimmedDocumentFolderId,
+          ...(isDocumentUploadByNameIntegrationTest
+            ? { folder_name: trimmedFolderName }
+            : { folder_id: trimmedDocumentFolderId }),
           company_id: Number(company?.company_id) || company?.company_id,
         };
 
         const uploadRequestUrl = isDocumentUploadAddHashtagIntegrationTest
           ? `${FILEVINE_UPLOAD_DOCUMENT_ADD_PROJECT_HASHTAG_INTEGRATION_TEST_API}${encodeURIComponent(trimmedHashtag)}/`
-          : FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API;
+          : isDocumentUploadByNameIntegrationTest
+            ? FILEVINE_UPLOAD_DOCUMENT_BY_FOLDER_NAME_INTEGRATION_TEST_API
+            : FILEVINE_UPLOAD_DOCUMENT_INTEGRATION_TEST_API;
 
         const uploadResponse = await apiRequest(uploadRequestUrl, {
           method: "POST",
@@ -1633,7 +1647,7 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
           headers: bodyIqRequestHeaders,
           request_body: bodyIqRequestBody,
           response_status_code: bodyIqResponseStatusCode,
-          response_body: null,
+          response_body: bodyIqResponseBody,
           error: errorMessage,
         }, null, 2));
       } else {
@@ -1658,9 +1672,13 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
       (integrationTest) => getIntegrationTypeTestOptionValue(integrationTest) === String(selectedReportUploadIntegrationTestId)
     )
   ).trim().toLowerCase();
+  const normalizedReportUploadIntegrationTypeLabel = selectedReportUploadIntegrationTypeLabel.replace(/\s+/g, "");
   const isBodyIqSendTestOrderIntegrationTest =
-    selectedReportUploadIntegrationTypeLabel === "body iq" &&
+    normalizedReportUploadIntegrationTypeLabel === "bodyiq" &&
     selectedReportUploadIntegrationTestLabel === "send test order";
+  const isDocumentUploadByNameIntegrationTest =
+    selectedReportUploadIntegrationTypeLabel === "filevine" &&
+    selectedReportUploadIntegrationTestLabel === "document upload - by name";
   const isDocumentUploadAddHashtagIntegrationTest =
     selectedReportUploadIntegrationTestLabel === "document upload - add hashtag";
   const isFileVineFullPostIntegrationTest =
@@ -2238,37 +2256,41 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
                       </select>
                     </Detail>
 
-                    {(isDocumentUploadIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) && (
+                    {(isDocumentUploadIntegrationTest || isDocumentUploadByNameIntegrationTest || isDocumentUploadAddHashtagIntegrationTest) && (
                       <>
-                        <Detail label="Patient">
-                          <select
-                            value={selectedReportUploadPatientId}
-                            onChange={handleReportUploadPatientChange}
-                          >
-                            <option value="">
-                              {reportUploadPatients.length === 0 ? "No patients available" : "Select a patient"}
-                            </option>
-                            {reportUploadPatients.map((patient, index) => {
-                              const patientValue = String(patient?.patient_id ?? "");
-                              const patientKey = patientValue || `company-patient-${index}`;
-
-                              return (
-                                <option key={patientKey} value={patientValue}>
-                                  {getPatientOptionLabel(patient)}
+                        {!isDocumentUploadByNameIntegrationTest && (
+                          <>
+                            <Detail label="Patient">
+                              <select
+                                value={selectedReportUploadPatientId}
+                                onChange={handleReportUploadPatientChange}
+                              >
+                                <option value="">
+                                  {reportUploadPatients.length === 0 ? "No patients available" : "Select a patient"}
                                 </option>
-                              );
-                            })}
-                          </select>
-                        </Detail>
+                                {reportUploadPatients.map((patient, index) => {
+                                  const patientValue = String(patient?.patient_id ?? "");
+                                  const patientKey = patientValue || `company-patient-${index}`;
 
-                        <Detail label="Document Folder ID">
-                          <input
-                            type="text"
-                            value={documentFolderId}
-                            onChange={(event) => setDocumentFolderId(event.target.value)}
-                            placeholder={documentFolderLoading ? "Loading folder ID..." : "Enter document folder ID"}
-                          />
-                        </Detail>
+                                  return (
+                                    <option key={patientKey} value={patientValue}>
+                                      {getPatientOptionLabel(patient)}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </Detail>
+
+                            <Detail label="Document Folder ID">
+                              <input
+                                type="text"
+                                value={documentFolderId}
+                                onChange={(event) => setDocumentFolderId(event.target.value)}
+                                placeholder={documentFolderLoading ? "Loading folder ID..." : "Enter document folder ID"}
+                              />
+                            </Detail>
+                          </>
+                        )}
 
                         <Detail label="Project ID">
                           <input
@@ -2278,6 +2300,17 @@ const CompanyModal = ({ company, allCompanies, mode, userTypeId, onClose, onUpda
                             placeholder="Enter project ID"
                           />
                         </Detail>
+
+                        {isDocumentUploadByNameIntegrationTest && (
+                          <Detail label="Folder Name">
+                            <input
+                              type="text"
+                              value={reportUploadFolderName}
+                              onChange={(event) => setReportUploadFolderName(event.target.value)}
+                              placeholder="Enter folder name"
+                            />
+                          </Detail>
+                        )}
 
                         {isDocumentUploadAddHashtagIntegrationTest && (
                           <Detail label="Hashtag">

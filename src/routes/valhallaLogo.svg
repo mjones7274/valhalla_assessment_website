@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Valhalla logo">
+  <rect width="120" height="120" fill="none"/>
+  <g fill="#f6bf3c">
+    <polygon points="14,86 38,38 58,76 44,76 30,104"/>
+    <polygon points="50,16 82,76 66,76 42,34"/>
+    <polygon points="74,16 106,76 90,76 66,34"/>
+    <polygon points="34,104 58,56 74,86 62,86 52,104"/>
+    <polygon points="52,104 76,56 98,104"/>
+  </g>
+  <g fill="#ffffff">
+    <polygon points="40,86 58,50 66,66 56,86"/>
+    <polygon points="58,50 68,30 90,72 78,72"/>
+    <polygon points="50,92 60,74 70,92"/>
+  </g>
+</svg>
