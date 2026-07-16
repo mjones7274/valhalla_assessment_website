@@ -1473,6 +1473,12 @@
   margin-bottom: 8px;
 }
 
+.order-history-date {
+  color: #64748b;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .user-address-card-body p {
   margin: 2px 0;
   font-size: 0.9rem;
@@ -1653,6 +1659,10 @@
   order: 3;
 }
 
+.patient-profile-right > .order-history-section {
+  order: 4;
+}
+
 .patient-data-card {
   padding: 0;
 }
@@ -1704,6 +1714,7 @@
 }
 
 .patient-profile-right .people-section,
+.patient-profile-right .order-history-section,
 .patient-profile-right .events-section,
 .patient-profile-right .user-addresses-section {
   margin-top: 0;

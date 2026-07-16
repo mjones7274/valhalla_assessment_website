@@ -20,6 +20,7 @@ const PATIENT_PEOPLE_API = `${API_BASE}/api/patient-people/`;
 const PATIENT_PHONES_API = `${API_BASE}/api/patient-phones/`;
 const PATIENT_ADDRESSES_API = `${API_BASE}/api/patient-addresses/`;
 const PATIENT_EVENTS_API = `${API_BASE}/api/patient-events/`;
+const PATIENT_ORDERS_API = `${API_BASE}/api/patient-orders`;
 const INJURY_EVENT_TYPES_API = `${API_BASE}/api/injury-event-types/`;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
@@ -1263,8 +1264,10 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const [showPersonModal, setShowPersonModal] = useState(false);
   const [removingLinkId, setRemovingLinkId] = useState(null);
   const [patientEvents, setPatientEvents] = useState([]);
+  const [patientOrders, setPatientOrders] = useState([]);
   const [injuryEventTypes, setInjuryEventTypes] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [savingEvent, setSavingEvent] = useState(false);
@@ -1308,6 +1311,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const [isPartnersSectionOpen, setIsPartnersSectionOpen] = useState(false);
   const [isEventsSectionOpen, setIsEventsSectionOpen] = useState(false);
   const [isAddressesSectionOpen, setIsAddressesSectionOpen] = useState(false);
+  const [isOrdersSectionOpen, setIsOrdersSectionOpen] = useState(false);
   const [isPhonesSectionOpen, setIsPhonesSectionOpen] = useState(true);
   const [newAddressData, setNewAddressData] = useState({
     street_1: "",
@@ -1443,6 +1447,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     setIsPartnersSectionOpen(false);
     setIsEventsSectionOpen(false);
     setIsAddressesSectionOpen(false);
+    setIsOrdersSectionOpen(false);
   }, [patient?.patient_id, mode]);
 
   useEffect(() => {
@@ -1528,6 +1533,40 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   useEffect(() => {
     loadPatientEvents();
   }, [loadPatientEvents]);
+
+  const loadPatientOrders = useCallback(async () => {
+    if (!patient?.patient_id) return;
+
+    setOrdersLoading(true);
+    try {
+      const res = await apiRequest(
+        `${PATIENT_ORDERS_API}?patient=${encodeURIComponent(patient.patient_id)}`
+      );
+      const payload = await res.json();
+      const ordersForPatient = (Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : [])
+        .slice()
+        .sort((left, right) => {
+          const leftTime = new Date(left?.order_date || 0).getTime();
+          const rightTime = new Date(right?.order_date || 0).getTime();
+          return rightTime - leftTime;
+        });
+
+      setPatientOrders(ordersForPatient);
+    } catch (err) {
+      console.error("Load patient orders failed", err);
+      setPatientOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [patient]);
+
+  useEffect(() => {
+    loadPatientOrders();
+  }, [loadPatientOrders]);
 
   const loadPatientPhonesAndAddresses = useCallback(async () => {
     if (!patient?.patient_id) return;
@@ -2143,6 +2182,21 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     return parsed.toLocaleDateString();
   };
 
+  const formatOrderAddress = (address) => {
+    if (!address) return "—";
+
+    const lineOne = String(address?.street_1 || "").trim();
+    const lineTwo = String(address?.street_2 || "").trim();
+    const city = String(address?.city || "").trim();
+    const state = String(address?.st || "").trim();
+    const zip = String(address?.zip || "").trim();
+    const locality = [city, state].filter(Boolean).join(", ");
+
+    return [lineOne, lineTwo, [locality, zip].filter(Boolean).join(" ")]
+      .filter(Boolean)
+      .join(" | ") || "—";
+  };
+
   const patientDisplayName = `${firstName || ""} ${lastName || ""}`.trim() || patientLabels.singular;
 
   const formatShippingAddressLabel = (address) => {
@@ -2181,9 +2235,6 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     );
     const selectedPhone = phones.find(
       (phoneRow) => String(getPhoneRowKey(phoneRow) || "") === selectedShippingPhoneKey
-    );
-    const selectedProductOption = supplementProductOptions.find(
-      (option) => String(option?.option_value || "").trim() === selectedSupplementProduct
     );
     const selectedOrderTypeOption = supplementOrderTypeOptions.find(
       (option) => option.value === selectedSupplementOrderType
@@ -2563,6 +2614,62 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
               )}
             </div>
 
+            <div className="patient-data-card order-history-section">
+              <div className="collapsible-section-header patient-data-card-header-row">
+                <button
+                  type="button"
+                  className="collapsible-section-toggle"
+                  aria-expanded={isOrdersSectionOpen}
+                  onClick={() => setIsOrdersSectionOpen((prev) => !prev)}
+                >
+                  <span>Order History</span>
+                  <span className="patient-card-chevron">{isOrdersSectionOpen ? "▾" : "▸"}</span>
+                </button>
+              </div>
+
+              {isOrdersSectionOpen && (
+                <div className="patient-data-card-body">
+                  {ordersLoading ? (
+                    <div className="people-empty">Loading order history...</div>
+                  ) : patientOrders.length === 0 ? (
+                    <div className="people-empty">No orders found for this patient.</div>
+                  ) : (
+                    <div className="user-addresses-grid order-history-grid">
+                      {patientOrders.map((order) => {
+                        const orderId = order?.patient_order_id ?? order?.id;
+                        const orderedByFirstName = String(order?.ordered_by?.first_name || "").trim();
+                        const orderedByLastName = String(order?.ordered_by?.last_name || "").trim();
+
+                        return (
+                          <div key={orderId ?? `${order?.order_date ?? "order"}-${order?.product ?? ""}`} className="user-address-card order-history-card">
+                            <div className="user-address-card-top">
+                              <strong>
+                                {`${order?.product || "—"} - ${order?.result?.bodyiq_response?.order?.line_items?.[0]?.name || "—"}`}
+                              </strong>
+                              <span className="order-history-date">{formatEventDate(order?.order_date)}</span>
+                            </div>
+
+                            <div className="user-address-card-body">
+                              <p>
+                                {`${order?.patient?.first_name || ""} ${order?.patient?.last_name || ""}`.trim() || "—"}
+                              </p>
+                              <p>{formatOrderAddress(order?.patient_address)}</p>
+                              <p>Order ID: {order?.result?.bodyiq_response?.order?.id || "—"}</p>
+                              <p>Order Name: {order?.result?.bodyiq_response?.order?.name || "—"}</p>
+                              <p>Order Type: {order?.order_type || "—"}</p>
+                              <p>
+                                Ordered By: {[orderedByFirstName, orderedByLastName].filter(Boolean).join(" ") || "—"}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="patient-data-card user-addresses-section">
               <div className="collapsible-section-header patient-data-card-header-row">
                 <button
@@ -2630,6 +2737,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                 </div>
               )}
             </div>
+
           </div>
 
           <div className="patient-data-card events-section events-section-full-width">
