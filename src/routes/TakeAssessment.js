@@ -265,14 +265,21 @@ export default function TakeAssessment() {
         const encodedToken = encodeURIComponent(token);
         let tokenPayload = null;
         try {
-          tokenPayload = await fetchJson(`/assessment/${encodedToken}/`);
-        } catch (withSlashError) {
-          const slashStatus = withSlashError?.status;
-          if (slashStatus === 404) {
-            tokenPayload = await fetchJson(`/assessment/${encodedToken}`);
-          } else {
-            throw withSlashError;
+          try {
+            tokenPayload = await fetchJson(`/assessment/${encodedToken}/`);
+          } catch (withSlashError) {
+            const slashStatus = withSlashError?.status;
+            if (slashStatus === 404) {
+              tokenPayload = await fetchJson(`/assessment/${encodedToken}`);
+            } else {
+              throw withSlashError;
+            }
           }
+        } catch (tokenError) {
+          if (tokenError?.status === 404) {
+            throw new Error("Invalid Token - please contact your provider");
+          }
+          throw tokenError;
         }
         mark("tokenFetchedAt");
 

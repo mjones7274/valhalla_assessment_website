@@ -135,6 +135,7 @@ const AppLayout = () => {
   const hideChrome = location.pathname.startsWith("/take-assessment/");
   const expiredDialogShownRef = React.useRef(false);
   const lastActivityRecordedAtRef = React.useRef(0);
+  const lastSessionPolicyCheckAtRef = React.useRef(Date.now());
 
   const forceLogoutToLogin = React.useCallback(() => {
     logout();
@@ -302,9 +303,14 @@ const AppLayout = () => {
   React.useEffect(() => {
     const events = ["mousedown", "keydown", "scroll", "touchstart", "mousemove"];
     const handleActivityEvent = () => {
-      if (isAuthenticated()) {
-        recordThrottledActivity();
+      if (!isAuthenticated()) return;
+
+      if (isSessionExpiredByPolicy()) {
+        forceLogoutToLogin();
+        return;
       }
+
+      recordThrottledActivity();
     };
 
     events.forEach((eventName) => {
@@ -316,16 +322,46 @@ const AppLayout = () => {
         window.removeEventListener(eventName, handleActivityEvent);
       });
     };
-  }, [recordThrottledActivity]);
+  }, [forceLogoutToLogin, recordThrottledActivity]);
+
+  React.useEffect(() => {
+    const handleResume = () => {
+      if (document.visibilityState === "hidden") return;
+      if (location.pathname === "/login" || !isAuthenticated()) return;
+
+      lastSessionPolicyCheckAtRef.current = Date.now();
+      if (isSessionExpiredByPolicy()) {
+        forceLogoutToLogin();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleResume);
+    window.addEventListener("focus", handleResume);
+    window.addEventListener("pageshow", handleResume);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleResume);
+      window.removeEventListener("focus", handleResume);
+      window.removeEventListener("pageshow", handleResume);
+    };
+  }, [forceLogoutToLogin, location.pathname]);
 
   React.useEffect(() => {
     const intervalId = setInterval(() => {
+      const now = Date.now();
+      const timeSinceLastCheck = now - lastSessionPolicyCheckAtRef.current;
+      lastSessionPolicyCheckAtRef.current = now;
+
       if (location.pathname === "/login" || !isAuthenticated()) {
         return;
       }
 
       if (isSessionExpiredByPolicy()) {
-        handleSessionExpired();
+        if (timeSinceLastCheck > 30000) {
+          forceLogoutToLogin();
+        } else {
+          handleSessionExpired();
+        }
         return;
       }
 
@@ -335,7 +371,7 @@ const AppLayout = () => {
     }, 15000);
 
     return () => clearInterval(intervalId);
-  }, [location.pathname, handleSessionExpired]);
+  }, [location.pathname, forceLogoutToLogin, handleSessionExpired]);
 
   React.useEffect(() => {
     if (!showSessionExpiredModal) return;

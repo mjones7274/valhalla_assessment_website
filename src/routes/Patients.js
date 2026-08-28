@@ -27,6 +27,7 @@ const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
+const PATIENT_TOKENS_ROTATE_API = `${API_BASE}/api/patient-tokens/rotate/`;
 const SEND_EMAIL_API = `${API_BASE}/api/send-email`;
 const SEND_EMAIL_API_ALT = `${API_BASE}/api/send-email/`;
 const ASSESSMENTS_API = `${API_BASE}/api/assessments/`;
@@ -123,6 +124,30 @@ const formatPhoneForInput = (value) => {
   }
 
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)} ${digits.slice(10)}`;
+};
+
+const getDateOnlyInputValue = (value) => {
+  const normalizedValue = String(value ?? "").trim();
+  if (!normalizedValue) return "";
+
+  const isoDateMatch = normalizedValue.match(/^(\d{4}-\d{2}-\d{2})(?:$|T|\s)/);
+  if (isoDateMatch) return isoDateMatch[1];
+
+  const parsed = new Date(normalizedValue);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateOnly = (value, emptyValue = "") => {
+  const dateInputValue = getDateOnlyInputValue(value);
+  if (!dateInputValue) return value ? String(value) : emptyValue;
+
+  const [year, month, day] = dateInputValue.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString();
 };
 
 const getResponseErrorMessage = async (response) => {
@@ -492,6 +517,29 @@ const getAttemptId = (attempt) => (
 
 const getAttemptStatus = (attempt) =>
   attempt.status ?? attempt.attempt_status ?? "assigned";
+
+const getAttemptTokenValue = (attempt) =>
+  String(
+    attempt?.token?.token ??
+    attempt?.token?.value ??
+    attempt?.token ??
+    attempt?.patient_token?.token ??
+    attempt?.patient_token?.value ??
+    attempt?.patient_token ??
+    attempt?.assessment_token ??
+    ""
+  ).trim();
+
+const getAttemptTokenExpiration = (attempt) =>
+  attempt?.token_expires_at ??
+  attempt?.token_expiration ??
+  attempt?.token_expires_on ??
+  attempt?.token_expiry ??
+  attempt?.expires_at ??
+  attempt?.patient_token?.expires_at ??
+  attempt?.patient_token?.expires_on ??
+  attempt?.token_details?.expires_at ??
+  "";
 
 const getAssessmentClassificationPillStyle = (classification) => {
   const normalizedClassification = String(classification || "").trim().toLowerCase();
@@ -1030,6 +1078,7 @@ const Patients = () => {
 
       return (
         String(p?.patient_id ?? "").includes(searchText) ||
+        normalizeSearchableText(p?.company_patient_id).includes(searchText) ||
         normalizeSearchableText(p?.first_name).includes(searchText) ||
         normalizeSearchableText(p?.last_name).includes(searchText) ||
         normalizeSearchableText(p?.email).includes(searchText) ||
@@ -1069,6 +1118,15 @@ const Patients = () => {
             new Date(a.created_on).getTime() || 0,
             new Date(b.created_on).getTime() || 0
           );
+        }
+
+        if (sortField === "company_patient_id") {
+          const comparison = normalizeText(a.company_patient_id).localeCompare(
+            normalizeText(b.company_patient_id),
+            undefined,
+            { numeric: true, sensitivity: "base" }
+          );
+          return sortDirection === "asc" ? comparison : -comparison;
         }
 
         if (sortField === "last_name") {
@@ -1170,8 +1228,14 @@ const Patients = () => {
           <tr>
             <th onClick={() => toggleSort("patient_id")}>
               <span className="patients-sort-header">
-                <span>ID</span>
+                <span>VH ID</span>
                 {renderSortCaret("patient_id")}
+              </span>
+            </th>
+            <th onClick={() => toggleSort("company_patient_id")}>
+              <span className="patients-sort-header">
+                <span>Company ID</span>
+                {renderSortCaret("company_patient_id")}
               </span>
             </th>
             <th onClick={() => toggleSort("first_name")}>
@@ -1209,6 +1273,7 @@ const Patients = () => {
             Array.from({ length: 6 }).map((_, index) => (
               <tr key={`patient-skeleton-${index}`} className="patients-table-skeleton-row" aria-hidden="true">
                 <td><div className="skeleton-line patients-skeleton-id" /></td>
+                <td><div className="skeleton-line patients-skeleton-id" /></td>
                 <td><div className="skeleton-line patients-skeleton-name" /></td>
                 <td><div className="skeleton-line patients-skeleton-name" /></td>
                 <td><div className="skeleton-line patients-skeleton-email" /></td>
@@ -1220,7 +1285,7 @@ const Patients = () => {
             ))
           ) : sortedPatients.length === 0 ? (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={9}>
                 <div className="people-empty">No {patientLabels.pluralLower} found.</div>
               </td>
             </tr>
@@ -1235,6 +1300,7 @@ const Patients = () => {
                 style={{ cursor: "pointer" }}
               >
                 <td>{p.patient_id}</td>
+                <td>{p.company_patient_id || "—"}</td>
                 <td>{p.first_name}</td>
                 <td>{p.last_name}</td>
                 <td>{p.email}</td>
@@ -1328,6 +1394,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const isEdit = mode === "edit";
 
   const [firstName, setFirstName] = useState(patient?.first_name || "");
+  const [middleName, setMiddleName] = useState(patient?.middle_name || "");
   const [lastName, setLastName] = useState(patient?.last_name || "");
   const [email, setEmail] = useState(patient?.email || "");
   const [dob, setDob] = useState(patient?.dob || "");
@@ -1426,6 +1493,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   useEffect(() => {
     if (patient) {
       setFirstName(patient.first_name || "");
+      setMiddleName(patient.middle_name || "");
       setLastName(patient.last_name || "");
       setEmail(patient.email || "");
       setDob(patient.dob || "");
@@ -2059,6 +2127,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
     try {
       const payload = {
         first_name: firstName,
+        middle_name: middleName,
         last_name: lastName,
         email,
         dob,
@@ -2086,7 +2155,11 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
         throw new Error(`Update failed with status ${response.status}`);
       }
 
-      const updatedPatient = await response.json();
+      const updatedPatientResponse = await response.json();
+      const updatedPatient = {
+        ...updatedPatientResponse,
+        middle_name: updatedPatientResponse?.middle_name ?? middleName,
+      };
 
       const relationCandidates = getPatientRelationCandidates(patient.patient_id);
 
@@ -2317,10 +2390,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   };
 
   const formatEventDate = (value) => {
-    if (!value) return "—";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString();
+    return formatDateOnly(value, "—");
   };
 
   const formatOrderAddress = (address) => {
@@ -2525,7 +2595,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                 {`${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase() || "P"}
               </div>
               <div className="patient-profile-name">
-                {`${firstName || ""} ${lastName || ""}`.trim() || patientLabels.singular}
+                {[firstName, middleName, lastName].filter(Boolean).join(" ") || patientLabels.singular}
               </div>
             </div>
 
@@ -2537,6 +2607,17 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                     <input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
                   ) : (
                     firstName || "—"
+                  )}
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Middle Name</span>
+                <div className="patient-profile-field-value">
+                  {isEdit ? (
+                    <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
+                  ) : (
+                    middleName || "—"
                   )}
                 </div>
               </div>
@@ -3493,6 +3574,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
 const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => {
   const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [dob, setDob] = useState("");
@@ -3586,10 +3668,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
   }, [companyId]);
 
   const formatEventDate = (value) => {
-    if (!value) return "—";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString();
+    return formatDateOnly(value, "—");
   };
 
   const handleRemoveStagedPerson = (personId) => {
@@ -3858,6 +3937,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             first_name: firstName,
+            middle_name: middleName,
             last_name: lastName,
             email,
             dob,
@@ -3968,6 +4048,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
 
       const patientWithCompany = {
         ...patient,
+        middle_name: patient?.middle_name ?? middleName,
         phones,
         addresses,
         companies: company
@@ -4002,7 +4083,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
                 {`${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase() || "P"}
               </div>
               <div className="patient-profile-name">
-                {`${firstName || ""} ${lastName || ""}`.trim() || `New ${patientLabels.singular}`}
+                {[firstName, middleName, lastName].filter(Boolean).join(" ") || `New ${patientLabels.singular}`}
               </div>
             </div>
 
@@ -4011,6 +4092,13 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
                 <span className="patient-profile-field-label">First Name</span>
                 <div className="patient-profile-field-value">
                   <input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Middle Name</span>
+                <div className="patient-profile-field-value">
+                  <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
                 </div>
               </div>
 
@@ -4639,24 +4727,15 @@ const PatientEventModal = ({
   onSave,
   injuryEventTypes = [],
 }) => {
-  const toDateInputValue = (value) => {
-    if (!value) return "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "";
-    return parsed.toISOString().slice(0, 10);
-  };
-
   const [eventText, setEventText] = useState(initialEvent?.event || "");
-  const [eventDate, setEventDate] = useState(toDateInputValue(initialEvent?.event_date));
+  const [eventDate, setEventDate] = useState(getDateOnlyInputValue(initialEvent?.event_date));
   const [injuryEventTypeId, setInjuryEventTypeId] = useState(
     String(getInjuryEventTypeId(initialEvent))
   );
 
   useEffect(() => {
     setEventText(initialEvent?.event || "");
-    setEventDate(toDateInputValue(initialEvent?.event_date));
+    setEventDate(getDateOnlyInputValue(initialEvent?.event_date));
     setInjuryEventTypeId(String(getInjuryEventTypeId(initialEvent)));
   }, [initialEvent]);
 
@@ -4969,6 +5048,7 @@ const PatientPersonModal = ({ companyId, patientId, linkedPersonIds, onClose, on
 
 const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [attempts, setAttempts] = useState([]);
+  const [tokenExpirationByAttemptId, setTokenExpirationByAttemptId] = useState({});
   const [attemptProgressByAttemptId, setAttemptProgressByAttemptId] = useState({});
   const [refreshingAttemptByKey, setRefreshingAttemptByKey] = useState({});
   const [linkFeedbackByAttemptKey, setLinkFeedbackByAttemptKey] = useState({});
@@ -4993,6 +5073,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   const [answerDocumentLoadingId, setAnswerDocumentLoadingId] = useState(null);
   const [answerDocumentError, setAnswerDocumentError] = useState("");
   const [loadingAnswersAttemptId, setLoadingAnswersAttemptId] = useState(null);
+  const [rotatingTokenAttemptId, setRotatingTokenAttemptId] = useState(null);
   const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
   const [selectedReportFields, setSelectedReportFields] = useState(null);
@@ -5339,9 +5420,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   }, [patient?.first_name, patient?.preferred_language?.code, primaryCompanyName]);
 
   const getOrCreateAttemptToken = useCallback(async (attempt) => {
-    const existingToken = String(
-      attempt?.token ?? attempt?.patient_token ?? attempt?.assessment_token ?? ""
-    ).trim();
+    const existingToken = getAttemptTokenValue(attempt);
 
     if (existingToken) {
       return existingToken;
@@ -5371,6 +5450,21 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     }
 
     return createdToken;
+  }, []);
+
+  const fetchTokenExpiration = useCallback(async (tokenValue) => {
+    const normalizedToken = String(tokenValue ?? "").trim();
+    if (!normalizedToken) return "";
+
+    const response = await apiRequest(
+      `${API_BASE}/api/patient-tokens/${encodeURIComponent(normalizedToken)}/expiration/`
+    );
+    if (!response.ok) {
+      throw new Error(`Token expiration request failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return String(payload?.expires_at ?? "").trim();
   }, []);
 
   const loadAttemptsForPatient = useCallback(async () => {
@@ -5552,6 +5646,38 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     };
   }, [inProgressAttemptIds, inProgressAttemptIdsKey, patient?.patient_id]);
 
+  const activeAttemptTokens = useMemo(() => attempts
+    .filter((attempt) => String(getAttemptStatus(attempt)).trim().toLowerCase() !== "completed")
+    .map((attempt) => ({
+      attemptId: Number(getAttemptId(attempt)),
+      token: getAttemptTokenValue(attempt),
+    }))
+    .filter(({ attemptId, token }) => Number.isFinite(attemptId) && attemptId > 0 && token), [attempts]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTokenExpirations = async () => {
+      const expirationEntries = await Promise.all(activeAttemptTokens.map(async ({ attemptId, token }) => {
+        try {
+          return [attemptId, await fetchTokenExpiration(token)];
+        } catch (error) {
+          console.error(`Load token expiration failed for attempt ${attemptId}`, error);
+          return [attemptId, ""];
+        }
+      }));
+
+      if (!cancelled) {
+        setTokenExpirationByAttemptId(Object.fromEntries(expirationEntries));
+      }
+    };
+
+    loadTokenExpirations();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAttemptTokens, fetchTokenExpiration]);
+
   useEffect(() => {
     const loadData = async () => {
       if (!patient?.patient_id) return;
@@ -5575,10 +5701,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
   }, [patient?.patient_id, loadAttemptsForPatient, loadAssessments, loadPatientEvents]);
 
   const formatEventOptionDate = (value) => {
-    if (!value) return "";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString();
+    return formatDateOnly(value);
   };
 
   const formatCompletedAtDate = (value) => {
@@ -5592,6 +5715,18 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+    });
+  };
+
+  const formatTokenExpirationDate = (value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "";
+
+    return parsed.toLocaleDateString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
@@ -6021,6 +6156,66 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     sendAssessmentLinkEmail,
     showLinkFeedback,
   ]);
+
+  const handleGenerateNewLink = useCallback(async (attempt) => {
+    const status = String(getAttemptStatus(attempt) ?? "").trim().toLowerCase();
+    if (status === "removed" || status === "completed") return;
+
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) {
+      console.error("Generate new assessment link failed: missing attempt id.");
+      return;
+    }
+
+    setRotatingTokenAttemptId(attemptId);
+
+    try {
+      const rotateResponse = await apiRequest(PATIENT_TOKENS_ROTATE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_assessment_attempt: attemptId,
+        }),
+      });
+
+      if (!rotateResponse.ok) {
+        const errorMessage = await getResponseErrorMessage(rotateResponse);
+        throw new Error(
+          `Token rotation failed with status ${rotateResponse.status}: ${errorMessage}`
+        );
+      }
+
+      const tokenPayload = await rotateResponse.json();
+      const rotatedToken = String(tokenPayload?.token ?? "").trim();
+      if (!rotatedToken) {
+        throw new Error("Token rotation response did not include token value.");
+      }
+      const rotatedTokenExpiration = await fetchTokenExpiration(rotatedToken);
+
+      setAttempts((prev) => prev.map((attemptItem) =>
+        Number(getAttemptId(attemptItem)) === attemptId
+          ? {
+              ...attemptItem,
+              token: rotatedToken,
+            }
+          : attemptItem
+      ));
+      setTokenExpirationByAttemptId((prev) => ({
+        ...prev,
+        [attemptId]: rotatedTokenExpiration,
+      }));
+
+      await sendAssessmentLinkEmail({
+        recipientEmail: patient?.email,
+        assessmentLink: buildAssessmentLink(rotatedToken),
+      });
+      showLinkFeedback(attempt, "Success! New link generated and emailed");
+    } catch (error) {
+      console.error("Generate new assessment link failed", error);
+    } finally {
+      setRotatingTokenAttemptId(null);
+    }
+  }, [buildAssessmentLink, fetchTokenExpiration, patient?.email, sendAssessmentLinkEmail, showLinkFeedback]);
 
   const handleDisableAssessment = async (attempt) => {
     let attemptId =
@@ -6561,6 +6756,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                   const isDisabledForActions =
                     statusKey === "removed" || statusKey === "completed";
                   const attemptId = getAttemptId(attempt);
+                  const isRotatingToken = Number(rotatingTokenAttemptId) === Number(attemptId);
                   const attemptFeedbackKey = getAttemptFeedbackKey(attempt);
                   const isRefreshingCard = Boolean(refreshingAttemptByKey[attemptFeedbackKey]);
                   const linkFeedbackMessage = linkFeedbackByAttemptKey[attemptFeedbackKey];
@@ -6589,6 +6785,10 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                     attempt?.completed_on ??
                     attempt?.updated_at ??
                     ""
+                  );
+                  const tokenExpirationText = formatTokenExpirationDate(
+                    tokenExpirationByAttemptId[Number(attemptId)] ??
+                    getAttemptTokenExpiration(attempt)
                   );
                   const classificationLabel = String(attempt?.classification || "").trim() || "Classification Pending";
                   const classificationPillStyle = getAssessmentClassificationPillStyle(classificationLabel);
@@ -6660,6 +6860,11 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             </span>
                           )}
                         </div>
+                        {tokenExpirationText && (
+                          <div className="assessment-token-expiration">
+                            <strong>Link Expires On:</strong> {tokenExpirationText}
+                          </div>
+                        )}
                       </div>
 
                       <div className="assessment-card-footer">
@@ -6673,7 +6878,15 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             marginLeft: "auto",
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "flex-end",
+                              flexWrap: "wrap",
+                              gap: "6px",
+                            }}
+                          >
                             {isCompleted && (
                               <button
                                 type="button"
@@ -6717,12 +6930,22 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             <button
                               type="button"
                               className="assessments-action-btn"
-                              disabled={isDisabledForActions}
+                              disabled={isDisabledForActions || isRotatingToken}
                               onClick={() => {
                                 handleSendLink(attempt);
                               }}
                             >
-                              Resend Link
+                              Resend Email
+                            </button>
+                            <button
+                              type="button"
+                              className="assessments-action-btn"
+                              disabled={isDisabledForActions || isRotatingToken}
+                              onClick={() => {
+                                handleGenerateNewLink(attempt);
+                              }}
+                            >
+                              {isRotatingToken ? "Generating..." : "Generate New Link"}
                             </button>
                             <button
                               type="button"

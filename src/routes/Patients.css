@@ -76,18 +76,19 @@
 .patients-table th:nth-child(1),
 .patients-table th:nth-child(2),
 .patients-table th:nth-child(3),
-.patients-table th:nth-child(8) {
+.patients-table th:nth-child(4),
+.patients-table th:nth-child(9) {
   text-align: left;
 }
 
-.patients-table th:nth-child(8) {
+.patients-table th:nth-child(9) {
   text-align: center;
 }
 
-.patients-table td:nth-child(4),
 .patients-table td:nth-child(5),
 .patients-table td:nth-child(6),
-.patients-table td:nth-child(7) {
+.patients-table td:nth-child(7),
+.patients-table td:nth-child(8) {
   text-align: center;
 }
 
@@ -1193,7 +1194,8 @@
 
 .patient-assessments-modal .assessment-card-actions {
   gap: 4px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .patient-assessments-modal .assessment-card-actions .assessments-action-btn,
