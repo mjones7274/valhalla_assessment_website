@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import "./Users.css"; // you can reuse Patients.css with tweaks
 import UserModal from "./UserModal";
 import { apiRequest } from "../api";
@@ -6,8 +7,36 @@ import { apiRequest } from "../api";
 
 const USERS_VIEW_URL = `${process.env.REACT_APP_API_URL_BASE}/api/users-view/`;
 
+const getUserTypeId = (user) =>
+  Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
+
+const getUserId = (user) =>
+  Number(user?.user_id ?? user?.id ?? user?.customer_id ?? 0);
+
+const getUserCompanyIds = (user) => {
+  const candidateSources = [
+    user?.companies,
+    user?.user_companies,
+    user?.associated_companies,
+  ];
+
+  if (user?.company) {
+    candidateSources.push([user.company]);
+  }
+
+  return Array.from(
+    new Set(
+      candidateSources
+        .flatMap((source) => (Array.isArray(source) ? source : []))
+        .map((entry) => Number(entry?.company?.company_id ?? entry?.company_id ?? entry?.company?.id ?? entry?.id ?? 0))
+        .filter((companyId) => Number.isFinite(companyId) && companyId > 0)
+    )
+  );
+};
+
 
 const Users = () => {
+  const { user } = useOutletContext() || {};
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -15,6 +44,10 @@ const Users = () => {
   const [sortDirection, setSortDirection] = useState("asc");
   const [selectedUser, setSelectedUser] = useState(null);
   const [modalMode, setModalMode] = useState(null); // "view" | "edit" | "add"
+
+  const userTypeId = getUserTypeId(user);
+  const currentUserId = getUserId(user);
+  const currentUserCompanyIds = useMemo(() => getUserCompanyIds(user), [user]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -82,8 +115,31 @@ const Users = () => {
     );
   }, []);
 
+  const visibleUsers = useMemo(() => {
+    if (userTypeId === 3) {
+      return users;
+    }
+
+    if (userTypeId === 2) {
+      if (currentUserCompanyIds.length === 0) {
+        return [];
+      }
+
+      return users.filter((listedUser) => {
+        const listedCompanyIds = getUserCompanyIds(listedUser);
+        return listedCompanyIds.some((companyId) => currentUserCompanyIds.includes(companyId));
+      });
+    }
+
+    if (userTypeId === 1) {
+      return users.filter((listedUser) => getUserId(listedUser) === currentUserId);
+    }
+
+    return [];
+  }, [currentUserCompanyIds, currentUserId, userTypeId, users]);
+
   const sortedUsers = useMemo(() => {
-    return [...users]
+    return [...visibleUsers]
       .filter(matchesSearch)
       .sort((a, b) => {
         let valA, valB;
@@ -100,7 +156,7 @@ const Users = () => {
         if (valA > valB) return sortDirection === "asc" ? 1 : -1;
         return 0;
       });
-  }, [users, sortField, sortDirection, matchesSearch, getCompanyNames]);
+  }, [visibleUsers, sortField, sortDirection, matchesSearch, getCompanyNames]);
 
   const toggleSort = (field) => {
     if (sortField === field) {
@@ -124,17 +180,19 @@ const Users = () => {
         />
       </div>
 
-      <div className="users-actions">
-        <button
-          className="primary"
-          onClick={() => {
-            setSelectedUser(null);
-            setModalMode("add");
-          }}
-        >
-          + Add New User
-        </button>
-      </div>
+      {userTypeId !== 1 && (
+        <div className="users-actions">
+          <button
+            className="primary"
+            onClick={() => {
+              setSelectedUser(null);
+              setModalMode("add");
+            }}
+          >
+            + Add New User
+          </button>
+        </div>
+      )}
 
       <table className="users-table">
         <thead>

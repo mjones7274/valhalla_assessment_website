@@ -23,21 +23,58 @@ const normalizePrefillPrompt = (value) => {
   const normalized = String(value ?? "")
     .trim()
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
+    .replace(/^[¿¡]+/, "")
     .replace(/[?.!:]+$/g, "")
     .trim();
 
   return normalized;
 };
 
+const AGE_PREFILL_PROMPTS = new Set([
+  "your age",
+  "age",
+  "su edad",
+  "edad",
+]);
+
+const DOB_PREFILL_PROMPTS = new Set([
+  "your date of birth",
+  "date of birth",
+  "su fecha de nacimiento",
+  "fecha de nacimiento",
+]);
+
+const INJURY_EVENT_DATE_PREFILL_PROMPTS = new Set([
+  "date of injury",
+  "injury date",
+  "date of event",
+  "event date",
+  "fecha de la lesion",
+  "fecha de lesion",
+  "fecha del incidente",
+  "fecha del evento",
+]);
+
+const REFERRAL_COMPANY_PREFILL_PROMPTS = new Set([
+  "provider or clinic referring you",
+  "referred by",
+  "company referral",
+  "proveedor o clinica que lo refiere",
+  "proveedor o clinica que le refirio",
+  "referido por",
+  "empresa de referencia",
+  "compania de referencia",
+]);
+
+const matchesPrefillPrompt = (prompt, titlePrompt, aliases) =>
+  aliases.has(prompt) || aliases.has(titlePrompt);
+
 const isInjuryEventDatePrompt = (value) => {
   const normalized = normalizePrefillPrompt(value);
-  return (
-    normalized === "date of injury" ||
-    normalized === "injury date" ||
-    normalized === "date of event" ||
-    normalized === "event date"
-  );
+  return INJURY_EVENT_DATE_PREFILL_PROMPTS.has(normalized);
 };
 
 const parseDateOnlyYmd = (raw) => {
@@ -285,11 +322,51 @@ const escapeEmailHtml = (value) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const buildSignatureAgreementEmailHtml = ({ firstName }) => {
-  const safeFirstName = escapeEmailHtml(String(firstName ?? "").trim() || "there");
+const buildSignatureAgreementEmailHtml = ({ firstName, languageCode = "en" }) => {
+  const isSpanish = String(languageCode ?? "en").trim().toLowerCase() === "es";
+  const safeFirstName = escapeEmailHtml(
+    String(firstName ?? "").trim() || (isSpanish ? "" : "there")
+  );
+
+  if (isSpanish) {
+    return `<!DOCTYPE html>
+<html lang="es">
+  <body style="margin:0; padding:0; background-color:#f4f7fb; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f7fb; margin:0; padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 18px rgba(15, 23, 42, 0.08);">
+            <tr>
+              <td style="background-color:#0f172a; padding:28px 36px; text-align:center;">
+                <h1 style="margin:0; font-size:24px; line-height:1.3; color:#ffffff; font-weight:700;">
+                  Su Acuerdo de Servicios de Valhalla Health
+                </h1>
+                <p style="margin:10px 0 0; font-size:14px; color:#cbd5e1;">
+                  Copia confirmada adjunta
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:36px;">
+                <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">Hola${safeFirstName ? ` ${safeFirstName}` : ""},</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Gracias por completar su documentación con Valhalla Health. Adjunto a este correo electrónico encontrará su Acuerdo de Servicios de Valhalla Health firmado para sus archivos.</p>
+                <div style="margin:0 0 24px; padding:20px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
+                  <p style="margin:0; font-size:16px; line-height:1.7; color:#334155;">Este acuerdo confirma las condiciones bajo las cuales Valhalla Health prestará servicios relacionados con su caso de lesiones personales y describe cómo se garantiza el pago de dichos servicios mediante los fondos de su acuerdo. Usted no es personalmente responsable de ningún saldo; su gravamen es sin recurso y está vinculado únicamente al resultado de su caso.</p>
+                </div>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Conserve este documento si aún no lo ha hecho. Si tiene alguna pregunta sobre el acuerdo o su cuenta, no dude en comunicarse directamente con nosotros.</p>
+                <p style="margin:28px 0 0; font-size:16px; line-height:1.7;">Saludos cordiales,<br /><strong>Valhalla Health</strong></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -333,10 +410,12 @@ const sendSignatureAgreementEmail = async ({
   downloadUrl,
   fileName,
   firstName,
+  languageCode = "en",
 }) => {
   const trimmedRecipientEmail = String(recipientEmail ?? "").trim();
   const trimmedDownloadUrl = String(downloadUrl ?? "").trim();
   const trimmedFileName = String(fileName ?? "Agreement Document.pdf").trim() || "Agreement Document.pdf";
+  const isSpanish = String(languageCode ?? "en").trim().toLowerCase() === "es";
 
   if (!trimmedRecipientEmail || !trimmedDownloadUrl) {
     return false;
@@ -344,8 +423,10 @@ const sendSignatureAgreementEmail = async ({
 
   const payload = {
     to_addresses: [trimmedRecipientEmail],
-    subject: "Your Valhalla Health Service Agreement - Confirmed Copy Enclosed",
-    body_html: buildSignatureAgreementEmailHtml({ firstName }),
+    subject: isSpanish
+      ? "Su Acuerdo de Servicios de Valhalla Health - Copia confirmada adjunta"
+      : "Your Valhalla Health Service Agreement - Confirmed Copy Enclosed",
+    body_html: buildSignatureAgreementEmailHtml({ firstName, languageCode }),
     attachments: [{
       download_url: trimmedDownloadUrl,
       file_name: trimmedFileName,
@@ -550,19 +631,38 @@ const getPersistedAnswerPayload = (
   {
     hasSubquestion = false,
     subquestionSelections = {},
+    languageCode = "en",
   } = {}
 ) => {
+  const availableOptions = normalizeOptions(question, languageCode);
+  const addStoredOptionFields = (item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+
+    const matchingOption = availableOptions.find((optionItem) =>
+      matchesSelectableOption(item, optionItem)
+    );
+
+    return matchingOption
+      ? {
+          ...item,
+          ...getStoredOptionFields(matchingOption, languageCode),
+        }
+      : item;
+  };
+
   if (hasSubquestion && Array.isArray(responseValue)) {
     return responseValue.map((item) => {
+      const storedItem = addStoredOptionFields(item);
+
       if (!shouldAllowSubquestionForAnswerValue(item?.value)) {
         if (!Object.prototype.hasOwnProperty.call(item ?? {}, "sub_answer")) {
           return {
-            ...item,
+            ...storedItem,
           };
         }
 
         const nextItem = {
-          ...item,
+          ...storedItem,
         };
         delete nextItem.sub_answer;
         return nextItem;
@@ -574,21 +674,29 @@ const getPersistedAnswerPayload = (
 
       if (!selectedSubAnswer) {
         return {
-          ...item,
+          ...storedItem,
         };
       }
 
       return {
-        ...item,
+        ...storedItem,
         sub_answer: {
           value: selectedSubAnswer?.value ?? null,
-          option: String(selectedSubAnswer?.option ?? ""),
+          ...getStoredOptionFields(selectedSubAnswer, languageCode),
         },
       };
     });
   }
 
   if (normalizeQuestionType(question) !== "signature_agreement") {
+    if (Array.isArray(responseValue)) {
+      return responseValue.map(addStoredOptionFields);
+    }
+
+    if (responseValue && typeof responseValue === "object") {
+      return addStoredOptionFields(responseValue);
+    }
+
     return responseValue ?? null;
   }
 
@@ -871,19 +979,76 @@ const hasPopulatedOptions = (options) => {
   return false;
 };
 
-const normalizeOptionItems = (options) => {
+const getLocalizedOptionKey = (languageCode = "en") => {
+  const normalizedLanguageCode = String(languageCode ?? "en").trim().toLowerCase();
+  const isEnglish = normalizedLanguageCode === "en" || normalizedLanguageCode === "english";
+  return !isEnglish && normalizedLanguageCode ? `option_${normalizedLanguageCode}` : "";
+};
+
+const getLocalizedOptionLabel = (optionItem, languageCode = "en") => {
+  const localizedOptionKey = getLocalizedOptionKey(languageCode);
+
+  if (localizedOptionKey) {
+    const localizedOption = optionItem?.[localizedOptionKey];
+
+    if (localizedOption !== undefined && localizedOption !== null) {
+      return String(localizedOption);
+    }
+  }
+
+  return String(optionItem?.option ?? optionItem?.label ?? "");
+};
+
+const getLocalizedOptionMoreInfo = (optionItem, languageCode = "en") => {
+  const localizedOptionKey = getLocalizedOptionKey(languageCode);
+
+  if (localizedOptionKey) {
+    const localizedMoreInfoKey = localizedOptionKey.replace("option_", "option_more_info_");
+    const localizedMoreInfo = optionItem?.[localizedMoreInfoKey];
+
+    if (localizedMoreInfo !== undefined && localizedMoreInfo !== null) {
+      return String(localizedMoreInfo);
+    }
+  }
+
+  return String(optionItem?.option_more_info ?? "");
+};
+
+const getStoredOptionFields = (optionItem, languageCode = "en") => {
+  const storedFields = {
+    option: String(optionItem?.default_option ?? optionItem?.option ?? optionItem?.label ?? ""),
+  };
+  const localizedOptionKey = getLocalizedOptionKey(languageCode);
+  const localizedOption = localizedOptionKey ? optionItem?.[localizedOptionKey] : null;
+
+  if (localizedOption !== undefined && localizedOption !== null) {
+    storedFields[localizedOptionKey] = String(localizedOption);
+  }
+
+  return storedFields;
+};
+
+const normalizeOptionItems = (options, languageCode = "en") => {
   if (!options) return [];
 
   if (Array.isArray(options)) {
     return options
       .map((optionItem, index) => {
         if (optionItem && typeof optionItem === "object") {
+          const defaultOption = String(optionItem?.option ?? optionItem?.label ?? "");
+          const localizedOptionKey = getLocalizedOptionKey(languageCode);
+          const localizedOption = localizedOptionKey ? optionItem?.[localizedOptionKey] : null;
           const normalizedOption = {
             order: Number(optionItem?.order ?? index + 1),
-            option: String(optionItem?.option ?? optionItem?.label ?? ""),
-            option_more_info: String(optionItem?.option_more_info ?? ""),
+            option: getLocalizedOptionLabel(optionItem, languageCode),
+            default_option: defaultOption,
+            option_more_info: getLocalizedOptionMoreInfo(optionItem, languageCode),
             value: optionItem?.value ?? optionItem?.option ?? optionItem?.label ?? "",
           };
+
+          if (localizedOption !== undefined && localizedOption !== null) {
+            normalizedOption[localizedOptionKey] = String(localizedOption);
+          }
 
           if (Object.prototype.hasOwnProperty.call(optionItem, "category")) {
             normalizedOption.category = optionItem.category;
@@ -910,12 +1075,20 @@ const normalizeOptionItems = (options) => {
     if (hasStructuredValues) {
       return Object.values(options)
         .map((value, index) => {
+          const defaultOption = String(value?.option ?? value?.label ?? "");
+          const localizedOptionKey = getLocalizedOptionKey(languageCode);
+          const localizedOption = localizedOptionKey ? value?.[localizedOptionKey] : null;
           const normalizedOption = {
             order: Number(value?.order ?? index + 1),
-            option: String(value?.option ?? value?.label ?? ""),
-            option_more_info: String(value?.option_more_info ?? ""),
+            option: getLocalizedOptionLabel(value, languageCode),
+            default_option: defaultOption,
+            option_more_info: getLocalizedOptionMoreInfo(value, languageCode),
             value: value?.value ?? value?.option ?? value?.label ?? "",
           };
+
+          if (localizedOption !== undefined && localizedOption !== null) {
+            normalizedOption[localizedOptionKey] = String(localizedOption);
+          }
 
           if (Object.prototype.hasOwnProperty.call(value ?? {}, "category")) {
             normalizedOption.category = value.category;
@@ -937,7 +1110,7 @@ const normalizeOptionItems = (options) => {
   return [];
 };
 
-const normalizeOptions = (question) => {
+const normalizeOptions = (question, languageCode = "en") => {
   const questionTypeOptions = question?.question_type?.options;
   const questionChoices = question?.choices;
 
@@ -947,7 +1120,7 @@ const normalizeOptions = (question) => {
       ? questionTypeOptions
       : null;
 
-  return normalizeOptionItems(options);
+  return normalizeOptionItems(options, languageCode);
 };
 
 const getQuestionSectionValue = (questionSection, fieldName) =>
@@ -955,6 +1128,28 @@ const getQuestionSectionValue = (questionSection, fieldName) =>
 
 const getQuestionSectionString = (questionSection, fieldName) =>
   String(getQuestionSectionValue(questionSection, fieldName) ?? "").trim();
+
+const getLocalizedQuestionSectionString = (
+  questionSection,
+  fieldName,
+  languageCode = "en"
+) => {
+  const normalizedLanguageCode = String(languageCode ?? "en").trim().toLowerCase();
+  const isEnglish = normalizedLanguageCode === "en" || normalizedLanguageCode === "english";
+
+  if (!isEnglish && normalizedLanguageCode) {
+    const localizedValue = getQuestionSectionString(
+      questionSection,
+      `${fieldName}_${normalizedLanguageCode}`
+    );
+
+    if (localizedValue) {
+      return localizedValue;
+    }
+  }
+
+  return getQuestionSectionString(questionSection, fieldName);
+};
 
 const buildSelectableItemIdentity = (item) => {
   if (item && typeof item === "object") {
@@ -1060,18 +1255,56 @@ const isDirectVideoFileUrl = (urlValue) => {
   return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(urlValue);
 };
 
-const toEmbeddableVideoUrl = (rawUrl) => {
+const toEmbeddableVideoUrl = (rawUrl, preferredLanguageCode = "en") => {
   const value = normalizeVideoUrl(rawUrl);
   if (!value) return "";
 
   try {
     const parsed = new URL(value);
     const host = parsed.hostname.toLowerCase();
+    const normalizedLanguageCode = String(preferredLanguageCode || "en")
+      .trim()
+      .toLowerCase();
+
+    const buildYouTubeEmbedUrl = (videoId) => {
+      const rawStart = parsed.searchParams.get("t") || parsed.searchParams.get("start");
+      const startSeconds = Number.parseInt(String(rawStart ?? "").replace(/\D/g, ""), 10);
+      const params = new URLSearchParams({
+        rel: "0",
+        modestbranding: "1",
+        playsinline: "1",
+        autoplay: "0",
+        enablejsapi: "1",
+      });
+
+      ["hl", "cc_load_policy", "cc_lang_pref"].forEach((parameterName) => {
+        const parameterValue = parsed.searchParams.get(parameterName);
+        if (parameterValue !== null) {
+          params.set(parameterName, parameterValue);
+        }
+      });
+
+      if (normalizedLanguageCode && normalizedLanguageCode !== "en") {
+        params.set("hl", normalizedLanguageCode);
+        params.set("cc_load_policy", "1");
+        params.set("cc_lang_pref", normalizedLanguageCode);
+      }
+
+      if (typeof window !== "undefined" && window.location?.origin) {
+        params.set("origin", window.location.origin);
+      }
+
+      if (Number.isFinite(startSeconds) && startSeconds > 0) {
+        params.set("start", String(startSeconds));
+      }
+
+      return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+    };
 
     if (host.includes("youtu.be")) {
       const videoId = parsed.pathname.replace(/^\/+/, "").split("/")[0];
       if (!videoId) return value;
-      return `https://www.youtube.com/embed/${videoId}`;
+      return buildYouTubeEmbedUrl(videoId);
     }
 
     if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
@@ -1084,26 +1317,7 @@ const toEmbeddableVideoUrl = (rawUrl) => {
       const videoId = watchId || shortsId || liveId || legacyId || embedId;
 
       if (!videoId) return "";
-
-      const rawStart = parsed.searchParams.get("t") || parsed.searchParams.get("start");
-      const startSeconds = Number.parseInt(String(rawStart ?? "").replace(/\D/g, ""), 10);
-      const params = new URLSearchParams({
-        rel: "0",
-        modestbranding: "1",
-        playsinline: "1",
-        autoplay: "0",
-        enablejsapi: "1",
-      });
-
-      if (typeof window !== "undefined" && window.location?.origin) {
-        params.set("origin", window.location.origin);
-      }
-
-      if (Number.isFinite(startSeconds) && startSeconds > 0) {
-        params.set("start", String(startSeconds));
-      }
-
-      return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
+      return buildYouTubeEmbedUrl(videoId);
     }
 
     if (host.includes("vimeo.com")) {
@@ -1118,7 +1332,12 @@ const toEmbeddableVideoUrl = (rawUrl) => {
   }
 };
 
-const SignatureDrawField = ({ value, onChange, disabled = false }) => {
+const SignatureDrawField = ({
+  value,
+  onChange,
+  disabled = false,
+  preferredLanguageCode = "en",
+}) => {
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
   const isDrawingRef = useRef(false);
@@ -1131,6 +1350,7 @@ const SignatureDrawField = ({ value, onChange, disabled = false }) => {
     : {};
   const signatureDataUrl = String(normalizedValue.signature_data_url ?? "");
   const fullName = String(normalizedValue.full_name ?? "");
+  const isSpanish = preferredLanguageCode === "es";
 
   const applyCanvasScale = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1270,14 +1490,16 @@ const SignatureDrawField = ({ value, onChange, disabled = false }) => {
   return (
     <div className={`run-assessment-signature-wrap ${disabled ? "is-disabled" : ""}`}>
       <div className="run-assessment-signature-header-row">
-        <div className="run-assessment-signature-label">Sign Here</div>
+        <div className="run-assessment-signature-label">
+          {isSpanish ? "Firme aquí" : "Sign Here"}
+        </div>
         <button
           type="button"
           className="run-assessment-signature-clear-btn"
           onClick={clearSignature}
           disabled={disabled}
         >
-          Clear Signature
+          {isSpanish ? "Borrar firma" : "Clear Signature"}
         </button>
       </div>
       <div className="run-assessment-signature-canvas-wrap" ref={wrapperRef}>
@@ -1293,7 +1515,7 @@ const SignatureDrawField = ({ value, onChange, disabled = false }) => {
       </div>
 
       <label className="run-assessment-signature-name-label" htmlFor="signature-full-name-input">
-        Type Your Full Name Here:
+        {isSpanish ? "Escriba su nombre completo aquí:" : "Type Your Full Name Here:"}
       </label>
       <input
         id="signature-full-name-input"
@@ -1328,6 +1550,7 @@ const AgreementSignatureField = ({
   emailRecipient,
   isRequired = false,
   questionTextClassName = "run-assessment-question-text",
+  preferredLanguageCode = "en",
 }) => {
   const scrollRef = useRef(null);
   const exportSurfaceRef = useRef(null);
@@ -1346,6 +1569,7 @@ const AgreementSignatureField = ({
     [agreementSource]
   );
   const hasAgreementContent = Boolean(agreementDefinition);
+  const isSpanish = preferredLanguageCode === "es";
   const dateText = useMemo(() => formatDateMmDdYyyy(), []);
   const resolvedDocumentTypeId = Number(
     documentTypeId ?? getCaseInsensitiveValue(agreementDefinition, "document_type_id") ?? 0
@@ -1514,6 +1738,7 @@ const AgreementSignatureField = ({
             downloadUrl: downloadUrl || documentUrl,
             fileName: documentNameForUpload,
             firstName: patientData?.first_name,
+            languageCode: preferredLanguageCode,
           });
           agreementSent = true;
         } catch (error) {
@@ -1546,6 +1771,7 @@ const AgreementSignatureField = ({
     resolvedDocumentTypeId,
     companyId,
     emailRecipient,
+    preferredLanguageCode,
     signatureDataUrl,
     assessmentAttemptId,
     uploadRequestFn,
@@ -1576,8 +1802,12 @@ const AgreementSignatureField = ({
 
         <div className="run-assessment-agreement-scroll-note">
           {hasViewedDocument
-            ? "Agreement review complete. You can now sign below."
-            : "Scroll to the end of the agreement to unlock the signature fields."}
+            ? isSpanish
+              ? "La revisión del acuerdo ha finalizado. Ahora puede firmar a continuación."
+              : "Agreement review complete. You can now sign below."
+            : isSpanish
+              ? "Desplácese hasta el final del acuerdo para desbloquear los campos de firma."
+              : "Scroll to the end of the agreement to unlock the signature fields."}
         </div>
       </div>
 
@@ -1608,6 +1838,7 @@ const AgreementSignatureField = ({
       <SignatureDrawField
         value={{ signature_data_url: signatureDataUrl, full_name: fullName }}
         disabled={!hasViewedDocument}
+        preferredLanguageCode={preferredLanguageCode}
         onChange={(nextSignature) =>
           onChange({
             ...normalizedValue,
@@ -1645,7 +1876,7 @@ const getInitialResponse = (questionType) => {
   return "";
 };
 
-const getVideoSource = (rawUrl) => {
+const getVideoSource = (rawUrl, preferredLanguageCode = "en") => {
   const normalizedUrl = normalizeVideoUrl(rawUrl);
   if (!normalizedUrl) {
     return { kind: "none", url: "" };
@@ -1655,7 +1886,7 @@ const getVideoSource = (rawUrl) => {
     return { kind: "native", url: normalizedUrl };
   }
 
-  const embedUrl = toEmbeddableVideoUrl(normalizedUrl);
+  const embedUrl = toEmbeddableVideoUrl(normalizedUrl, preferredLanguageCode);
   if (embedUrl) {
     return { kind: "embed", url: embedUrl };
   }
@@ -1969,12 +2200,31 @@ export default function RunAssessment({
   assessmentId = null,
   patientEventId = null,
   attemptIdOverride = null,
+  skippedQuestionSectionIds = [],
+  preferredLanguageCode = "en",
   prefillData = null,
   showMetadataToggle = true,
   signatureAgreementEmailRecipient = null,
   requestFn = apiRequest,
 }) {
-  const questions = useMemo(() => getFlatQuestions(sections), [sections]);
+  const normalizedPreferredLanguageCode = String(preferredLanguageCode || "en")
+    .trim()
+    .toLowerCase();
+  const isSpanish = normalizedPreferredLanguageCode === "es";
+  const skippedQuestionSectionIdSet = useMemo(
+    () => new Set(
+      (Array.isArray(skippedQuestionSectionIds) ? skippedQuestionSectionIds : [])
+        .map((questionSectionId) => Number(questionSectionId))
+        .filter((questionSectionId) => Number.isFinite(questionSectionId) && questionSectionId > 0)
+    ),
+    [skippedQuestionSectionIds]
+  );
+  const questions = useMemo(
+    () => getFlatQuestions(sections).filter(
+      (item) => !skippedQuestionSectionIdSet.has(Number(item?.questionSectionId))
+    ),
+    [sections, skippedQuestionSectionIdSet]
+  );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [responses, setResponses] = useState({});
   const [showMetadata, setShowMetadata] = useState(false);
@@ -2753,6 +3003,13 @@ export default function RunAssessment({
       if (!conditionalQuestions.length) return;
 
       conditionalQuestions.forEach((questionSection) => {
+        const questionSectionId = Number(
+          questionSection?.question_section_id ??
+          questionSection?.question_section?.question_section_id ??
+          0
+        );
+        if (skippedQuestionSectionIdSet.has(questionSectionId)) return;
+
         expanded.push({
           assessmentSectionId: null,
           sectionId: targetSectionId,
@@ -2767,11 +3024,7 @@ export default function RunAssessment({
               questionSection?.question_section?.is_required ??
               false
           ),
-          questionSectionId: Number(
-            questionSection?.question_section_id ??
-              questionSection?.question_section?.question_section_id ??
-              0
-          ),
+          questionSectionId,
           questionSection,
           question: questionSection?.question ?? {},
           isConditionalFlowQuestion: true,
@@ -2792,6 +3045,13 @@ export default function RunAssessment({
           conditionalQuestionSectionsBySectionId[forcedTargetSectionId] || [];
 
         fallbackConditionalQuestions.forEach((questionSection) => {
+          const questionSectionId = Number(
+            questionSection?.question_section_id ??
+            questionSection?.question_section?.question_section_id ??
+            0
+          );
+          if (skippedQuestionSectionIdSet.has(questionSectionId)) return;
+
           expanded.push({
             assessmentSectionId: null,
             sectionId: forcedTargetSectionId,
@@ -2805,11 +3065,7 @@ export default function RunAssessment({
                 questionSection?.question_section?.is_required ??
                 false
             ),
-            questionSectionId: Number(
-              questionSection?.question_section_id ??
-                questionSection?.question_section?.question_section_id ??
-                0
-            ),
+            questionSectionId,
             questionSection,
             question: questionSection?.question ?? {},
             isConditionalFlowQuestion: true,
@@ -2830,6 +3086,7 @@ export default function RunAssessment({
     conditionalQuestionSectionsBySectionId,
     forceConditionalSourceQuestionId,
     forceConditionalTargetSectionId,
+    skippedQuestionSectionIdSet,
   ]);
 
   useEffect(() => {
@@ -2954,15 +3211,19 @@ export default function RunAssessment({
     currentItem?.questionSection,
     "has_subquestion"
   );
-  const currentSubQuestionPrompt = getQuestionSectionString(
+  const currentSubQuestionPrompt = getLocalizedQuestionSectionString(
     currentItem?.questionSection,
-    "sub_question_prompt"
+    "sub_question_prompt",
+    normalizedPreferredLanguageCode
   );
   const currentSubQuestionType = getQuestionSectionValue(
     currentItem?.questionSection,
     "sub_question_type"
   );
-  const currentSubQuestionOptions = normalizeOptionItems(currentSubQuestionType?.options);
+  const currentSubQuestionOptions = normalizeOptionItems(
+    currentSubQuestionType?.options,
+    normalizedPreferredLanguageCode
+  );
   const currentSubQuestionTypeLabel = getQuestionSectionTypeLabel(
     currentItem?.questionSection,
     "sub_question_type"
@@ -3206,6 +3467,7 @@ export default function RunAssessment({
     const answerPayload = getPersistedAnswerPayload(question, currentResponseSnapshot, {
       hasSubquestion: currentQuestionHasSubquestion,
       subquestionSelections: filteredSubquestionSelectionsSnapshot,
+      languageCode: normalizedPreferredLanguageCode,
     });
     const shouldIncludeScoreValue = toBooleanRequired(
       currentItem?.questionSection?.include_sum_total ??
@@ -3833,28 +4095,13 @@ export default function RunAssessment({
       const titlePrompt = normalizePrefillPrompt(question?.title);
       if (!prompt && !titlePrompt) return;
 
-      const isReferralCompanyPrompt = (rawPrompt) => {
-        const normalized = normalizePrefillPrompt(rawPrompt);
-        if (!normalized) return false;
-        return (
-          normalized === "provider or clinic referring you" ||
-          normalized === "referred by" ||
-          normalized === "company referral"
-        );
-      };
-
       let prefillValue;
 
-      if (prompt === "your age" || prompt === "age" || titlePrompt === "your age" || titlePrompt === "age") {
+      if (matchesPrefillPrompt(prompt, titlePrompt, AGE_PREFILL_PROMPTS)) {
         if (Number.isFinite(prefillContext?.age)) {
           prefillValue = prefillContext.age;
         }
-      } else if (
-        prompt === "your date of birth" ||
-        prompt === "date of birth" ||
-        titlePrompt === "your date of birth" ||
-        titlePrompt === "date of birth"
-      ) {
+      } else if (matchesPrefillPrompt(prompt, titlePrompt, DOB_PREFILL_PROMPTS)) {
         if (prefillContext?.dobYmd) {
           prefillValue = prefillContext.dobYmd;
         }
@@ -3862,16 +4109,7 @@ export default function RunAssessment({
         if (prefillContext?.eventDateYmd) {
           prefillValue = prefillContext.eventDateYmd;
         }
-      } else if (
-        prompt === "self description of your accident" ||
-        prompt === "accident description" ||
-        prompt === "event description" ||
-        prompt === "self description of the event"
-      ) {
-        if (prefillContext?.eventDescription) {
-          prefillValue = prefillContext.eventDescription;
-        }
-      } else if (isReferralCompanyPrompt(prompt) || isReferralCompanyPrompt(titlePrompt)) {
+      } else if (matchesPrefillPrompt(prompt, titlePrompt, REFERRAL_COMPANY_PREFILL_PROMPTS)) {
         if (prefillContext?.referralCompanyName) {
           prefillValue = prefillContext.referralCompanyName;
         }
@@ -3946,6 +4184,8 @@ export default function RunAssessment({
     };
 
     advance();
+    // These actions intentionally use the values from this auto-advance trigger render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isOpen,
     isAttemptReady,
@@ -3959,11 +4199,14 @@ export default function RunAssessment({
     attemptId,
   ]);
 
-  const selectOptions = normalizeOptions(question)
+  const selectOptions = normalizeOptions(question, normalizedPreferredLanguageCode)
     .sort((left, right) => Number(left.order ?? 0) - Number(right.order ?? 0));
   const currentVideoUrl =
     questionType === "perform_task_video" ? String(question?.hyperlink ?? "").trim() : "";
-  const currentVideoSource = getVideoSource(currentVideoUrl);
+  const currentVideoSource = getVideoSource(
+    currentVideoUrl,
+    normalizedPreferredLanguageCode
+  );
   const currentYouTubeVideoId =
     currentVideoSource.kind === "embed" ? getYouTubeEmbedVideoId(currentVideoSource.url) : "";
   const isYouTubeFallbackActive = Boolean(
@@ -4085,40 +4328,89 @@ export default function RunAssessment({
 
         destroyPlayer();
 
-        const mountNode = document.createElement("div");
+        const mountNode = document.createElement("iframe");
+        mountNode.src = currentVideoSource.url;
+        mountNode.title = `question-video-${questionId}`;
+        mountNode.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+        mountNode.allowFullscreen = true;
+        mountNode.referrerPolicy = "strict-origin-when-cross-origin";
         mountNode.style.width = "100%";
         mountNode.style.height = "100%";
+        mountNode.style.border = "0";
         youtubeContainerRef.current.appendChild(mountNode);
         youtubeMountNodeRef.current = mountNode;
 
         try {
+          const applyPreferredTranslatedCaptionTrack = (player) => {
+            if (
+              normalizedPreferredLanguageCode === "en" ||
+              typeof player?.setOption !== "function"
+            ) {
+              return;
+            }
+
+            try {
+              const availableTracks = typeof player?.getOption === "function"
+                ? player.getOption("captions", "tracklist")
+                : [];
+              const normalizedTracks = Array.isArray(availableTracks) ? availableTracks : [];
+              const translatedTrackId = `ta.en.${normalizedPreferredLanguageCode}`;
+              const translatedTrack = normalizedTracks.find(
+                (track) =>
+                  String(track?.vssId ?? "").toLowerCase() === translatedTrackId ||
+                  String(track?.languageCode ?? "").toLowerCase() ===
+                    normalizedPreferredLanguageCode
+              );
+
+              if (translatedTrack) {
+                player.setOption("captions", "track", translatedTrack);
+                return;
+              }
+
+              const englishSourceTrack = normalizedTracks.find(
+                (track) => String(track?.languageCode ?? "").toLowerCase() === "en"
+              );
+              player.setOption("captions", "track", {
+                ...(englishSourceTrack ?? {
+                  languageCode: "en",
+                  kind: "asr",
+                  vssId: "a.en",
+                }),
+                translationLanguage: {
+                  languageCode: normalizedPreferredLanguageCode,
+                },
+              });
+            } catch {
+              // YouTube exposes caption tracks only after its captions module is ready.
+            }
+          };
+
           youtubePlayerRef.current = new YT.Player(mountNode, {
-            videoId: currentYouTubeVideoId,
-            width: "100%",
-            height: "100%",
-            playerVars: {
-              rel: 0,
-              modestbranding: 1,
-              playsinline: 1,
-              autoplay: 0,
-            },
             events: {
               onReady: (event) => {
-                event.target.cueVideoById({
-                  videoId: currentYouTubeVideoId,
-                  startSeconds: 0,
-                });
+                if (typeof event.target?.loadModule === "function") {
+                  event.target.loadModule("captions");
+                }
+                applyPreferredTranslatedCaptionTrack(event.target);
+              },
+              onApiChange: (event) => {
+                applyPreferredTranslatedCaptionTrack(event.target);
               },
               onStateChange: (event) => {
+                if (
+                  event.data === YT.PlayerState.CUED ||
+                  event.data === YT.PlayerState.PLAYING
+                ) {
+                  applyPreferredTranslatedCaptionTrack(event.target);
+                }
+
                 if (event.data === YT.PlayerState.ENDED) {
                   setVideoCompletionByQuestionId((prev) => ({
                     ...prev,
                     [questionId]: true,
                   }));
-                  event.target.cueVideoById({
-                    videoId: currentYouTubeVideoId,
-                    startSeconds: 0,
-                  });
+                  event.target.seekTo(0, true);
+                  event.target.pauseVideo();
                 }
               },
             },
@@ -4150,7 +4442,9 @@ export default function RunAssessment({
     isAttemptReady,
     questionType,
     currentYouTubeVideoId,
+    currentVideoSource.url,
     questionId,
+    normalizedPreferredLanguageCode,
     youtubeEmbedFallbackByQuestionId,
   ]);
 
@@ -4569,6 +4863,7 @@ export default function RunAssessment({
             }}
             isRequired={isCurrentQuestionRequired}
             questionTextClassName={questionTextClassName}
+            preferredLanguageCode={normalizedPreferredLanguageCode}
           />
         );
       case "zipcode":
@@ -4606,6 +4901,7 @@ export default function RunAssessment({
         return (
           <input
             type="date"
+            lang={normalizedPreferredLanguageCode}
             value={String(currentResponse ?? "")}
             onChange={(event) => setResponse(event.target.value)}
             className="run-assessment-input"
@@ -4824,7 +5120,7 @@ export default function RunAssessment({
 
               const nextItem = {
                 order: optionOrder,
-                option: optionItem.option,
+                ...getStoredOptionFields(optionItem, normalizedPreferredLanguageCode),
                 value: optionItem.value,
                 ...(Object.prototype.hasOwnProperty.call(optionItem ?? {}, "category")
                   ? { category: optionItem.category }
@@ -4883,7 +5179,10 @@ export default function RunAssessment({
                     trailingContent:
                       checked && selectedSubquestionResponse?.option ? (
                         <span className="run-assessment-option-subquestion-answer">
-                          {selectedSubquestionResponse.option}
+                          {getLocalizedOptionLabel(
+                            selectedSubquestionResponse,
+                            normalizedPreferredLanguageCode
+                          )}
                         </span>
                       ) : null,
                   })
@@ -4921,7 +5220,7 @@ export default function RunAssessment({
                   onChange: () =>
                     setResponse({
                       order: optionOrder,
-                      option: optionItem.option,
+                      ...getStoredOptionFields(optionItem, normalizedPreferredLanguageCode),
                       value: optionItem.value,
                     }),
                 });
@@ -4956,7 +5255,7 @@ export default function RunAssessment({
                   onChange: () =>
                     setResponse({
                       order: optionOrder,
-                      option: optionItem.option,
+                      ...getStoredOptionFields(optionItem, normalizedPreferredLanguageCode),
                       value: optionItem.value,
                     }),
                 });
@@ -5023,7 +5322,7 @@ export default function RunAssessment({
                 />
               </div>
               <div className="run-assessment-progress-label">
-                Question {currentIndex + 1} of {totalQuestions}
+                {isSpanish ? "Pregunta" : "Question"} {currentIndex + 1} of {totalQuestions}
               </div>
             </div>
           </div>
@@ -5125,7 +5424,10 @@ export default function RunAssessment({
                             onClick={() => {
                               const nextSubAnswer = {
                                 value: optionItem?.value ?? optionItem?.option ?? "",
-                                option: String(optionItem?.option ?? ""),
+                                ...getStoredOptionFields(
+                                  optionItem,
+                                  normalizedPreferredLanguageCode
+                                ),
                               };
 
                               setSubquestionSelectionsWithRef((prev) => ({
@@ -5134,7 +5436,10 @@ export default function RunAssessment({
                                   ...(prev[questionId] ?? {}),
                                   [activeSubquestionPopup.parentOptionId]: {
                                     order: Number(optionItem?.order),
-                                    option: String(optionItem?.option ?? ""),
+                                    ...getStoredOptionFields(
+                                      optionItem,
+                                      normalizedPreferredLanguageCode
+                                    ),
                                     value: optionItem?.value ?? optionItem?.option ?? "",
                                   },
                                 },
@@ -5233,7 +5538,7 @@ export default function RunAssessment({
                 disabled={currentIndex === 0}
               >
                 <span className="run-assessment-arrow" aria-hidden="true">←</span>
-                <span>Previous</span>
+                <span>{isSpanish ? "Anterior" : "Previous"}</span>
               </button>
               <button
                 type="button"
@@ -5247,7 +5552,15 @@ export default function RunAssessment({
                   isIncompleteSignatureAgreement
                 }
               >
-                <span>{currentIndex === totalQuestions - 1 ? "SUBMIT" : "Next"}</span>
+                <span>
+                  {currentIndex === totalQuestions - 1
+                    ? isSpanish
+                      ? "Enviar"
+                      : "SUBMIT"
+                    : isSpanish
+                      ? "Siguiente"
+                      : "Next"}
+                </span>
                 {currentIndex !== totalQuestions - 1 && (
                   <span className="run-assessment-arrow" aria-hidden="true">→</span>
                 )}

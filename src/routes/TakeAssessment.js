@@ -42,6 +42,36 @@ const getAttemptIdValue = (attempt) =>
     0
   ) || 0;
 
+const normalizeQuestionControls = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return [value];
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const getSkippedQuestionSectionIds = (questionControls, assessmentId) => {
+  const resolvedAssessmentId = Number(assessmentId);
+
+  return new Set(
+    normalizeQuestionControls(questionControls)
+      .filter((control) => (
+        String(control?.action ?? "").trim().toLowerCase() === "skip" &&
+        Number(control?.assessment_id) === resolvedAssessmentId
+      ))
+      .map((control) => Number(control?.question_section_id))
+      .filter((questionSectionId) => Number.isFinite(questionSectionId) && questionSectionId > 0)
+  );
+};
+
 const InfoDialog = ({ title, message, onClose }) => (
   <div
     style={{
@@ -109,6 +139,7 @@ export default function TakeAssessment() {
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(null);
   const [assessmentDetails, setAssessmentDetails] = useState(null);
+  const [preferredLanguageCode, setPreferredLanguageCode] = useState("en");
   const [showBlockedDialog, setShowBlockedDialog] = useState(false);
   const [showSubmittedDialog, setShowSubmittedDialog] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
@@ -118,6 +149,15 @@ export default function TakeAssessment() {
   const [isSessionExpiredAcknowledged, setIsSessionExpiredAcknowledged] = useState(false);
   const inactivityTimeoutRef = useRef(null);
   const inactivityLastResetRef = useRef(0);
+
+  useEffect(() => {
+    const previousLanguage = document.documentElement.lang;
+    document.documentElement.lang = preferredLanguageCode || "en";
+
+    return () => {
+      document.documentElement.lang = previousLanguage;
+    };
+  }, [preferredLanguageCode]);
 
   useEffect(() => {
     if (isSessionExpired || isSessionExpiredAcknowledged) {
@@ -213,6 +253,7 @@ export default function TakeAssessment() {
 
       setLoading(true);
       setError(null);
+      setPreferredLanguageCode("en");
       setShowBlockedDialog(false);
       setShowSubmittedDialog(false);
       setHasStarted(false);
@@ -264,10 +305,23 @@ export default function TakeAssessment() {
           throw new Error("Unable to resolve assessment id from token response.");
         }
 
+        const preferredLanguageCode = String(
+          attemptData?.patient?.preferred_language?.code ?? "en"
+        )
+          .trim()
+          .toLowerCase();
+        if (!cancelled) {
+          setPreferredLanguageCode(preferredLanguageCode || "en");
+        }
+        const assessmentDetailsPath =
+          preferredLanguageCode && preferredLanguageCode !== "en"
+            ? `/api/assessments-detail/${assessmentId}/?language=${encodeURIComponent(preferredLanguageCode)}`
+            : `/api/assessments-detail/${assessmentId}/`;
+
         let details;
         mark("detailsFetchStartedAt");
         try {
-          details = await fetchJson(`/api/assessments-detail/${assessmentId}/`);
+          details = await fetchJson(assessmentDetailsPath);
         } catch {
           details = await fetchJson(`/api/assessments/${assessmentId}/`);
         }
@@ -296,6 +350,14 @@ export default function TakeAssessment() {
 
   const groupedSections = useMemo(() => {
     const sections = assessmentDetails?.sections ?? [];
+    const resolvedAssessmentId = Number(
+      attempt?.assessment?.assessment_id ?? attempt?.assessment_id ?? attempt?.assessment ?? 0
+    );
+    const skippedQuestionSectionIds = getSkippedQuestionSectionIds(
+      attempt?.question_controls,
+      resolvedAssessmentId
+    );
+
     return sections
       .slice()
       .sort((a, b) => Number(a.section_order ?? 0) - Number(b.section_order ?? 0))
@@ -306,9 +368,17 @@ export default function TakeAssessment() {
         title: section?.title,
         description: section?.description,
         instructions: section?.instructions,
-        questions: [...(section?.questions || [])].sort(compareQuestionOrder),
+        questions: [...(section?.questions || [])]
+          .filter((questionSection) => !skippedQuestionSectionIds.has(
+            Number(
+              questionSection?.question_section_id ??
+              questionSection?.question_section?.question_section_id ??
+              0
+            )
+          ))
+          .sort(compareQuestionOrder),
       }));
-  }, [assessmentDetails]);
+  }, [assessmentDetails, attempt]);
 
   const selectedCompany = getSelectedCompany();
   const companyFromAttempt =
@@ -358,9 +428,17 @@ export default function TakeAssessment() {
     0
   ) || null;
   const attemptIdOverride = getAttemptIdValue(attempt) || null;
+  const skippedQuestionSectionIds = useMemo(
+    () => Array.from(
+      getSkippedQuestionSectionIds(attempt?.question_controls, assessmentId)
+    ),
+    [assessmentId, attempt?.question_controls]
+  );
 
   const attemptStatus = String(attempt?.status ?? "").toLowerCase();
   const shouldShowWelcome = attemptStatus === "assigned" && !hasStarted;
+  const useProctor =
+    assessmentDetails?.use_proctor === true || attempt?.assessment?.use_proctor === true;
 
   const startAssessment = async () => {
     if (isStarting) return;
@@ -371,7 +449,9 @@ export default function TakeAssessment() {
       return;
     }
 
-    const firstSection = groupedSections[0] ?? null;
+    const firstSection = groupedSections.find(
+      (section) => Array.isArray(section?.questions) && section.questions.length > 0
+    ) ?? null;
     const firstQuestionSection = firstSection?.questions?.[0] ?? null;
     const firstQuestionId =
       Number(
@@ -418,6 +498,31 @@ export default function TakeAssessment() {
         }
         return { ...previousAttempt, status: "in_progress" };
       });
+
+      if (useProctor) {
+        try {
+          const proctoringRes = await apiRequestPublic(
+            `/api/patient-assessment-attempts/${resolvedAttemptId}/proctoring-session/`,
+            { method: "POST" }
+          );
+          if (proctoringRes.ok) {
+            const proctoringData = await proctoringRes.json().catch(() => null);
+            const launchUrl = proctoringData?.url;
+            if (launchUrl) {
+              window.location.href = launchUrl;
+              return;
+            }
+          } else {
+            console.error(
+              "[TakeAssessment] proctoring session request failed",
+              proctoringRes.status
+            );
+          }
+        } catch (proctoringErr) {
+          console.error("[TakeAssessment] proctoring session request failed", proctoringErr);
+        }
+      }
+
       setHasStarted(true);
     } catch (err) {
       console.error("[TakeAssessment] start failed", err);
@@ -584,7 +689,15 @@ export default function TakeAssessment() {
                     disabled={isStarting}
                     style={{ flex: "unset", width: "min(340px, 100%)" }}
                   >
-                    <span>{isStarting ? "Starting..." : "Start Assessment"}</span>
+                    <span>
+                      {isStarting
+                        ? preferredLanguageCode === "es"
+                          ? "Iniciando..."
+                          : "Starting..."
+                        : preferredLanguageCode === "es"
+                          ? "Iniciar evaluación"
+                          : "Start Assessment"}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -617,6 +730,8 @@ export default function TakeAssessment() {
       patient={attempt?.patient ?? null}
       patientEventId={patientEventId}
       attemptIdOverride={attemptIdOverride}
+      skippedQuestionSectionIds={skippedQuestionSectionIds}
+      preferredLanguageCode={preferredLanguageCode}
       prefillData={{
         first_name: attempt?.patient?.first_name ?? null,
         last_name: attempt?.patient?.last_name ?? null,

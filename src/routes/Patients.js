@@ -27,14 +27,15 @@ const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
-const TEST_SEND_EMAIL_API = `${API_BASE}/api/test/send-email`;
-const TEST_SEND_EMAIL_API_ALT = `${API_BASE}/api/test/send-email/`;
+const SEND_EMAIL_API = `${API_BASE}/api/send-email`;
+const SEND_EMAIL_API_ALT = `${API_BASE}/api/send-email/`;
 const ASSESSMENTS_API = `${API_BASE}/api/assessments/`;
 const COGNITRACKX_REPORT_HTML_API = `${API_BASE}/api/reports/cognitrackx/html`;
 const PEOPLE_API = `${API_BASE}/api/people/`;
 const PERSON_TYPES_API = `${API_BASE}/api/person-types/`;
 const PHONE_TYPES_API = `${API_BASE}/api/phone-types/`;
 const ADDRESS_TYPES_API = `${API_BASE}/api/address-types/`;
+const LANGUAGES_API = `${API_BASE}/api/languages/`;
 const INTEGRATION_OPTIONS_API = `${API_BASE}/api/integration-options/`;
 const BODYIQ_SEND_ORDER_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
 
@@ -819,6 +820,33 @@ const getPatientCompanyIds = (patient) =>
     .map((entry) => Number(entry?.company?.company_id ?? entry?.company_id ?? entry?.company?.id ?? 0))
     .filter((id) => Number.isFinite(id) && id > 0);
 
+const hasPopulatedQuestionControls = (value) => {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === "object") return Object.keys(value).length > 0;
+  return value !== null && value !== undefined && String(value).trim().length > 0;
+};
+
+const getQuestionControlItems = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return [value];
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const questionControlsApplyToAssessment = (value, assessmentId) =>
+  getQuestionControlItems(value).some(
+    (control) => Number(control?.assessment_id) === Number(assessmentId)
+  );
+
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
   .replace(/</g, "&lt;")
@@ -826,13 +854,65 @@ const escapeHtml = (value) => String(value ?? "")
   .replace(/"/g, "&quot;")
   .replace(/'/g, "&#39;");
 
-const buildAssessmentLinkEmailHtml = ({ firstName, companyName, assessmentLink }) => {
-  const safeFirstName = escapeHtml(firstName || "there");
-  const safeCompanyName = escapeHtml(companyName || "your care team");
+const buildAssessmentLinkEmailHtml = ({
+  firstName,
+  companyName,
+  assessmentLink,
+  languageCode = "en",
+}) => {
+  const isSpanish = String(languageCode || "en").trim().toLowerCase() === "es";
+  const safeFirstName = escapeHtml(firstName || (isSpanish ? "paciente" : "there"));
+  const safeCompanyName = escapeHtml(
+    companyName || (isSpanish ? "su equipo de atención" : "your care team")
+  );
+  const isValhallaHealthCompany = String(companyName || "")
+    .trim()
+    .toLowerCase() === "valhalla health";
   const safeAssessmentLink = escapeHtml(assessmentLink || "");
+  const copy = isSpanish
+    ? {
+        documentLanguage: "es",
+        heading: "Su evaluación CogniTrackX está lista",
+        actionRequired: "Acción requerida",
+        greeting: `Hola ${safeFirstName},`,
+        ready: "Su evaluación CogniTrackX está lista.",
+        description: "CogniTrackX es una herramienta estandarizada de detección cognitiva utilizada por Valhalla Health para establecer una línea de base objetiva de su función cognitiva y neurológica. Este es un paso importante para documentar el impacto total de su lesión: los resultados pasan a formar parte de su expediente médico y se ponen a disposición de su equipo de atención y de su abogado.",
+        completeHere: "Puede completar su evaluación aquí:",
+        startAssessment: "Iniciar su evaluación",
+        remindersHeading: "Algunas cosas que debe tener en cuenta antes de comenzar:",
+        reminders: [
+          "Busque un lugar tranquilo y sin distracciones",
+          "Complete la evaluación en una sola sesión",
+          "Responda con sinceridad; no hay respuestas correctas o incorrectas",
+          "La evaluación tarda aproximadamente entre 5 y 8 minutos",
+        ],
+        results: "Sus resultados se procesarán y se incorporarán a su expediente a la brevedad. Si tiene alguna pregunta antes o después de completar su evaluación, nuestro equipo está disponible para ayudarle.",
+        regards: "Saludos cordiales",
+        association: "en asociación con",
+      }
+    : {
+        documentLanguage: "en",
+        heading: "Your CogniTrackX Assessment Is Ready",
+        actionRequired: "Action Required",
+        greeting: `Hi ${safeFirstName},`,
+        ready: "Your CogniTrackX assessment is ready.",
+        description: "CogniTrackX is a standardized cognitive screening tool used by Valhalla Health to establish an objective baseline of your cognitive and neurological function. This is an important step in documenting the full impact of your injury - the results become part of your medical record and are made available to your care team and your attorney.",
+        completeHere: "You can complete your assessment here:",
+        startAssessment: "Start Your Assessment",
+        remindersHeading: "A few things to keep in mind before you begin:",
+        reminders: [
+          "Find a quiet space with no distractions",
+          "Complete the assessment in one sitting",
+          "Answer honestly - there are no right or wrong responses",
+          "The assessment takes approximately 5-8 minutes",
+        ],
+        results: "Your results will be processed and delivered to your file promptly. If you have any questions before or after completing your assessment, our team is available to assist you.",
+        regards: "Warm regards",
+        association: "in association with",
+      };
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${copy.documentLanguage}">
   <body style="margin:0; padding:0; background-color:#f4f7fb; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f7fb; margin:0; padding:24px 0;">
       <tr>
@@ -841,37 +921,36 @@ const buildAssessmentLinkEmailHtml = ({ firstName, companyName, assessmentLink }
             <tr>
               <td style="background-color:#0f172a; padding:28px 36px; text-align:center;">
                 <h1 style="margin:0; font-size:24px; line-height:1.3; color:#ffffff; font-weight:700;">
-                  Your CogniTrackX Assessment Is Ready
+                  ${copy.heading}
                 </h1>
                 <p style="margin:10px 0 0; font-size:14px; color:#cbd5e1;">
-                  Action Required
+                  ${copy.actionRequired}
                 </p>
               </td>
             </tr>
             <tr>
               <td style="padding:36px;">
-                <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">Hi ${safeFirstName},</p>
-                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Your CogniTrackX assessment is ready.</p>
-                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">CogniTrackX is a standardized cognitive screening tool used by Valhalla Health to establish an objective baseline of your cognitive and neurological function. This is an important step in documenting the full impact of your injury - the results become part of your medical record and are made available to your care team and your attorney.</p>
-                <p style="margin:0 0 18px; font-size:16px; line-height:1.7;">You can complete your assessment here:</p>
+                <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">${copy.greeting}</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">${copy.ready}</p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">${copy.description}</p>
+                <p style="margin:0 0 18px; font-size:16px; line-height:1.7;">${copy.completeHere}</p>
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
                   <tr>
                     <td align="center" style="border-radius:8px; background-color:#2563eb;">
-                      <a href="${safeAssessmentLink}" style="display:inline-block; padding:14px 24px; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none;">Start Your Assessment</a>
+                      <a href="${safeAssessmentLink}" style="display:inline-block; padding:14px 24px; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none;">${copy.startAssessment}</a>
                     </td>
                   </tr>
                 </table>
                 <div style="margin:0 0 24px; padding:20px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
-                  <p style="margin:0 0 12px; font-size:16px; font-weight:700; color:#0f172a;">A few things to keep in mind before you begin:</p>
+                  <p style="margin:0 0 12px; font-size:16px; font-weight:700; color:#0f172a;">${copy.remindersHeading}</p>
                   <ul style="margin:0; padding-left:20px; font-size:15px; line-height:1.8; color:#334155;">
-                    <li>Find a quiet space with no distractions</li>
-                    <li>Complete the assessment in one sitting</li>
-                    <li>Answer honestly - there are no right or wrong responses</li>
-                    <li>The assessment takes approximately 5-8 minutes</li>
+                    ${copy.reminders.map((reminder) => `<li>${reminder}</li>`).join("")}
                   </ul>
                 </div>
-                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">Your results will be processed and delivered to your file promptly. If you have any questions before or after completing your assessment, our team is available to assist you.</p>
-                <p style="margin:28px 0 0; font-size:16px; line-height:1.7;">Warm regards,<br /><strong>Valhalla Health</strong> in association with <strong>${safeCompanyName}</strong></p>
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.7;">${copy.results}</p>
+                <p style="margin:28px 0 0; font-size:16px; line-height:1.7;">${copy.regards},<br />${isValhallaHealthCompany
+                  ? "<strong>Valhalla Health</strong>"
+                  : `<strong>Valhalla Health</strong> ${copy.association} <strong>${safeCompanyName}</strong>`}</p>
               </td>
             </tr>
           </table>
@@ -1259,6 +1338,21 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const [isActive, setIsActive] = useState(
     patient ? patient.is_active : false
   );
+  const [companies, setCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState(
+    String(
+      patient?.companies?.[0]?.company?.company_id ??
+      patient?.companies?.[0]?.company_id ??
+      ""
+    )
+  );
+  const [companyPatientId, setCompanyPatientId] = useState(
+    patient?.company_patient_id ?? ""
+  );
+  const [languages, setLanguages] = useState([]);
+  const [preferredLanguageCode, setPreferredLanguageCode] = useState(
+    patient?.preferred_language?.code ?? ""
+  );
   const [patientPeople, setPatientPeople] = useState([]);
   const [peopleLoading, setPeopleLoading] = useState(false);
   const [showPersonModal, setShowPersonModal] = useState(false);
@@ -1349,8 +1443,11 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
         )
       );
       setAddresses(Array.isArray(patient.addresses) ? patient.addresses : []);
+      setCompanyId(String(patientCompanyId || ""));
+      setCompanyPatientId(patient?.company_patient_id ?? "");
+      setPreferredLanguageCode(patient?.preferred_language?.code ?? "");
     }
-  }, [patient]);
+  }, [patient, patientCompanyId]);
 
   useEffect(() => {
     const firstAddressKey = getAddressRowKey(addresses[0]);
@@ -1456,14 +1553,24 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
       apiRequest(PHONE_TYPES_API).then((res) => res.json()),
       apiRequest(ADDRESS_TYPES_API).then((res) => res.json()),
       apiRequest(INJURY_EVENT_TYPES_API).then((res) => res.json()),
+      apiRequest(COMPANIES_API).then((res) => res.json()),
     ])
-      .then(([patientTypeRows, phoneTypeRows, addressTypeRows, injuryEventTypeRows]) => {
+      .then(([patientTypeRows, phoneTypeRows, addressTypeRows, injuryEventTypeRows, companyRows]) => {
         setPatientTypes(patientTypeRows);
         setPhoneTypes(phoneTypeRows);
         setAddressTypes(addressTypeRows);
         setInjuryEventTypes(injuryEventTypeRows);
+        setCompanies(Array.isArray(companyRows) ? companyRows : []);
       })
       .catch(console.error);
+
+    apiRequest(LANGUAGES_API)
+      .then((res) => res.json())
+      .then((languageRows) => setLanguages(Array.isArray(languageRows) ? languageRows : []))
+      .catch((error) => {
+        console.error("Load languages failed", error);
+        setLanguages([]);
+      });
   }, []);
 
   const loadPatientPeople = useCallback(async () => {
@@ -1957,6 +2064,8 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
         dob,
         patient_type_id: patientTypeId ? Number(patientTypeId) : null,
         is_active: isActive,
+        company_patient_id: companyPatientId || null,
+        preferred_language_code: preferredLanguageCode || null,
       };
 
       let response = await apiRequest(`${PATIENTS_API_URL}${patient.patient_id}/`, {
@@ -2067,6 +2176,38 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
       }
 
       await loadPatientPhonesAndAddresses();
+
+      // Try to persist the patient <-> company link (company assignment only;
+      // company_patient_id lives on the main patient record and is saved above).
+      try {
+        const relation = patient?.companies?.[0] ?? null;
+        const existingRelationId = relation?.company_patient_id ?? null;
+        const selectedCompanyId = Number(companyId || (relation?.company_id ?? 0)) || null;
+
+        if (existingRelationId) {
+          // PATCH existing relation
+          await apiRequest(`${COMPANY_PATIENTS_API}${existingRelationId}/`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              company_id: selectedCompanyId,
+              patient_id: patient.patient_id,
+            }),
+          }).catch(() => {});
+        } else if (selectedCompanyId) {
+          // Create a new company-patient link if none exists
+          await apiRequest(COMPANY_PATIENTS_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              company_id: selectedCompanyId,
+              patient_id: patient.patient_id,
+            }),
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.error("Persist company-patient link failed", err);
+      }
 
       if (onUpdated) {
         onUpdated(updatedPatient);
@@ -2453,7 +2594,34 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
               <div className="patient-profile-field-row">
                 <span className="patient-profile-field-label">Company</span>
-                <div className="patient-profile-field-value">{companyNames}</div>
+                <div className="patient-profile-field-value">
+                  {isEdit ? (
+                    <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                      <option value="">Select company</option>
+                      {companies.map((company) => (
+                        <option key={company.company_id} value={company.company_id}>
+                          {company.company_name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    companyNames
+                  )}
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Company Patient ID</span>
+                <div className="patient-profile-field-value">
+                  {isEdit ? (
+                    <input
+                      value={companyPatientId || ""}
+                      onChange={(e) => setCompanyPatientId(e.target.value)}
+                    />
+                  ) : (
+                    companyPatientId || "—"
+                  )}
+                </div>
               </div>
 
               <div className="patient-profile-field-row">
@@ -2472,6 +2640,27 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                     <span className={`status-pill ${isActive ? "active" : "inactive"}`}>
                       {isActive ? "Active" : "Inactive"}
                     </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Preferred Language</span>
+                <div className="patient-profile-field-value">
+                  {isEdit ? (
+                    <select
+                      value={preferredLanguageCode}
+                      onChange={(e) => setPreferredLanguageCode(e.target.value)}
+                    >
+                      <option value="">Select language</option>
+                      {languages.map((language) => (
+                        <option key={language.code} value={language.code}>
+                          {language.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    patient?.preferred_language?.name || "—"
                   )}
                 </div>
               </div>
@@ -3309,6 +3498,9 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
   const [dob, setDob] = useState("");
   const [patientTypeId, setPatientTypeId] = useState("");
   const [companyId, setCompanyId] = useState("");
+  const [companyPatientId, setCompanyPatientId] = useState("");
+  const [languages, setLanguages] = useState([]);
+  const [preferredLanguageCode, setPreferredLanguageCode] = useState("");
   const [isActive, setIsActive] = useState(true);
 
   const useClientTerminology = shouldUseClientTerminology();
@@ -3378,7 +3570,15 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
       setPhoneTypes(phoneTypeRows);
       setAddressTypes(addressTypeRows);
       setInjuryEventTypes(Array.isArray(injuryEventTypeRows) ? injuryEventTypeRows : []);
-    });
+    }).catch(console.error);
+
+    apiRequest(LANGUAGES_API)
+      .then((res) => res.json())
+      .then((languageRows) => setLanguages(Array.isArray(languageRows) ? languageRows : []))
+      .catch((error) => {
+        console.error("Load languages failed", error);
+        setLanguages([]);
+      });
   }, [restrictedCompanyId]);
 
   useEffect(() => {
@@ -3663,6 +3863,8 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
             dob,
             patient_type_id: patientTypeId,
             is_active: isActive,
+            company_patient_id: companyPatientId || null,
+            preferred_language_code: preferredLanguageCode || null,
           }),
         }
       );
@@ -3866,6 +4068,13 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
               </div>
 
               <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Company Patient ID</span>
+                <div className="patient-profile-field-value">
+                  <input value={companyPatientId} onChange={(e) => setCompanyPatientId(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
                 <span className="patient-profile-field-label">Status</span>
                 <div className="patient-profile-field-value">
                   <label className="checkbox-row">
@@ -3876,6 +4085,23 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
                     />
                     <span>{isActive ? "Active" : "Inactive"}</span>
                   </label>
+                </div>
+              </div>
+
+              <div className="patient-profile-field-row">
+                <span className="patient-profile-field-label">Preferred Language</span>
+                <div className="patient-profile-field-value">
+                  <select
+                    value={preferredLanguageCode}
+                    onChange={(e) => setPreferredLanguageCode(e.target.value)}
+                  >
+                    <option value="">Select language</option>
+                    {languages.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {language.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
@@ -5056,26 +5282,36 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
       throw new Error("Patient email is missing.");
     }
 
+    const preferredLanguageCode = String(
+      patient?.preferred_language?.code ?? "en"
+    )
+      .trim()
+      .toLowerCase();
+    const isSpanish = preferredLanguageCode === "es";
+
     const emailHtml = buildAssessmentLinkEmailHtml({
-      firstName: String(patient?.first_name || "").trim() || "there",
+      firstName: String(patient?.first_name || "").trim(),
       companyName: primaryCompanyName,
       assessmentLink,
+      languageCode: preferredLanguageCode,
     });
 
     const basePayload = {
       to_addresses: [trimmedRecipientEmail],
-      subject: "Your CogniTrackX Assessment Is Ready – Action Required",
+      subject: isSpanish
+        ? "Su evaluación CogniTrackX está lista – Acción requerida"
+        : "Your CogniTrackX Assessment Is Ready – Action Required",
       body_html: emailHtml,
     };
 
-    let response = await apiRequest(TEST_SEND_EMAIL_API, {
+    let response = await apiRequest(SEND_EMAIL_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(basePayload),
     });
 
     if (response.status === 404) {
-      response = await apiRequest(TEST_SEND_EMAIL_API_ALT, {
+      response = await apiRequest(SEND_EMAIL_API_ALT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(basePayload),
@@ -5100,7 +5336,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
     throw new Error(
       `Send assessment email failed with status ${response.status}: ${normalizedError}`
     );
-  }, [patient?.first_name, primaryCompanyName]);
+  }, [patient?.first_name, patient?.preferred_language?.code, primaryCompanyName]);
 
   const getOrCreateAttemptToken = useCallback(async (attempt) => {
     const existingToken = String(
@@ -5947,11 +6183,50 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
 
     setAssigning(true);
     try {
+      const selectedAssessmentNumericId = Number(selectedAssessmentId);
+      const activePatientCompanyEntries = (patient?.companies ?? []).filter(
+        (entry) => entry?.is_active !== false
+      );
+      const matchingPatientCompanyEntry = activePatientCompanyEntries.find((entry) => {
+        const patientCompanyData = entry?.company ?? entry;
+        return questionControlsApplyToAssessment(
+          patientCompanyData?.question_controls,
+          selectedAssessmentNumericId
+        );
+      }) ?? activePatientCompanyEntries[0] ?? null;
+      const patientCompanyData =
+        matchingPatientCompanyEntry?.company ?? matchingPatientCompanyEntry;
+      const patientCompanyId = Number(
+        patientCompanyData?.company_id ?? patientCompanyData?.id ?? 0
+      );
+
+      if (!Number.isFinite(patientCompanyId) || patientCompanyId <= 0) {
+        throw new Error("Unable to assign assessment: patient company is missing.");
+      }
+
+      const companyResponse = await apiRequest(`${COMPANIES_API}${patientCompanyId}/`);
+      if (!companyResponse.ok) {
+        throw new Error(
+          `Unable to load patient company controls (status ${companyResponse.status}).`
+        );
+      }
+
+      const companyPayload = await companyResponse.json();
+      const companyData = companyPayload?.company ?? companyPayload;
+      const apiQuestionControls = companyData?.question_controls;
+      const patientCompanyQuestionControls = patientCompanyData?.question_controls;
+      const companyQuestionControls = hasPopulatedQuestionControls(apiQuestionControls)
+        ? apiQuestionControls
+        : hasPopulatedQuestionControls(patientCompanyQuestionControls)
+          ? patientCompanyQuestionControls
+          : apiQuestionControls ?? patientCompanyQuestionControls ?? null;
+
       const payload = {
         patient_id: patient.patient_id,
-        assessment_id: Number(selectedAssessmentId),
+        assessment_id: selectedAssessmentNumericId,
         status: "assigned",
         patient_event_id: Number(selectedPatientEventId),
+        question_controls: companyQuestionControls ?? null,
       };
 
       const response = await apiRequest(PATIENT_ASSESSMENT_ATTEMPTS_API, {
@@ -5964,12 +6239,59 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
         throw new Error(`Assign failed with status ${response.status}`);
       }
 
-      const createdAttempt = await response.json();
+      let createdAttempt = await response.json();
       const createdAttemptId =
         getAttemptId(createdAttempt) ??
         createdAttempt?.patient_assessment_attempt_id ??
         createdAttempt?.id ??
         null;
+      const createdQuestionControls = createdAttempt?.question_controls;
+      const hasCreatedQuestionControls = hasPopulatedQuestionControls(createdQuestionControls);
+
+      if (
+        createdAttemptId &&
+        hasPopulatedQuestionControls(companyQuestionControls) &&
+        !hasCreatedQuestionControls
+      ) {
+        const controlsPatchResponse = await apiRequest(
+          `${PATIENT_ASSESSMENT_ATTEMPTS_API}${createdAttemptId}/`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question_controls: companyQuestionControls }),
+          }
+        );
+
+        if (!controlsPatchResponse.ok) {
+          throw new Error(
+            `Assessment was created, but question controls were not copied (status ${controlsPatchResponse.status}).`
+          );
+        }
+
+        const patchedAttempt = await controlsPatchResponse.json().catch(() => null);
+        if (patchedAttempt && Object.prototype.hasOwnProperty.call(patchedAttempt, "question_controls")) {
+          const patchedQuestionControls = patchedAttempt.question_controls;
+          const hasPatchedQuestionControls = hasPopulatedQuestionControls(
+            patchedQuestionControls
+          );
+
+          if (!hasPatchedQuestionControls) {
+            console.warn(
+              "[PatientAssessmentsModal] Attempt response did not reflect question_controls after PATCH",
+              {
+                attemptId: createdAttemptId,
+                requestedQuestionControls: companyQuestionControls,
+                responseQuestionControls: patchedQuestionControls,
+              }
+            );
+          } else {
+            createdAttempt = {
+              ...createdAttempt,
+              ...patchedAttempt,
+            };
+          }
+        }
+      }
 
       if (createdAttemptId) {
         try {
@@ -6229,9 +6551,15 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
               <div className="assessment-cards">
                 {displayedAttempts.map((attempt) => {
                   const status = getAttemptStatus(attempt);
-                  const statusKey = String(status).toLowerCase();
+                  const statusKey = String(status).trim().toLowerCase();
+                  const statusLabel = {
+                    assigned: "Assigned",
+                    in_progress: "In Progress",
+                    completed: "Completed",
+                    removed: "Removed",
+                  }[statusKey] ?? String(status);
                   const isDisabledForActions =
-                    status === "removed" || status === "completed";
+                    statusKey === "removed" || statusKey === "completed";
                   const attemptId = getAttemptId(attempt);
                   const attemptFeedbackKey = getAttemptFeedbackKey(attempt);
                   const isRefreshingCard = Boolean(refreshingAttemptByKey[attemptFeedbackKey]);
@@ -6254,7 +6582,7 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                     attempt.patient_event?.event ??
                     matchedEvent?.event ??
                     "No Event";
-                  const isCompleted = String(status).toLowerCase() === "completed";
+                  const isCompleted = statusKey === "completed";
                   const completedAtText = formatCompletedAtDate(
                     attempt?.completed_at ??
                     attempt?.completedAt ??
@@ -6287,15 +6615,18 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                       </div>
 
                       <div className="assessment-card-meta">
-                        <div className="assessment-status-row">
-                          <strong>Status:</strong>{" "}
-                          <span
-                            className={`assessment-status-badge ${statusKey}`}
-                          >
-                            {status}
+                        <div className={`assessment-status-row ${isCompleted ? "completed-layout" : ""}`}>
+                          <span className="assessment-status-group">
+                            <strong>Status:</strong>
+                            <span
+                              className={`assessment-status-badge ${statusKey}`}
+                            >
+                              {statusLabel}
+                            </span>
                           </span>
                           {isCompleted && (
                             <span
+                              className="assessment-classification-badge"
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -6312,7 +6643,10 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                             </span>
                           )}
                           {isCompleted && completedAtText && (
-                            <span style={{ fontWeight: 400, color: "#475569" }}>
+                            <span
+                              className="assessment-completed-date"
+                              style={{ fontWeight: 400, color: "#475569" }}
+                            >
                               <span style={{ color: "#2563eb" }}>Date:</span>{" "}
                               {completedAtText}
                             </span>

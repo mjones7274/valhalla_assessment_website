@@ -1054,10 +1054,33 @@
 }
 
 .assessment-status-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.assessment-status-group {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.assessment-status-row.completed-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.assessment-status-row.completed-layout .assessment-classification-badge {
+  justify-self: center;
+}
+
+.assessment-status-row.completed-layout .assessment-completed-date {
+  justify-self: end;
+  text-align: right;
 }
 
 .patient-assessments-modal .assessment-card-meta strong,
@@ -1546,7 +1569,7 @@
 
 .patient-profile-layout {
   display: grid;
-  grid-template-columns: 350px 1fr;
+  grid-template-columns: 400px 1fr;
   gap: 18px;
 }
 
@@ -1596,7 +1619,7 @@
 
 .patient-profile-field-row {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 170px 1fr;
   gap: 10px;
   align-items: center;
   padding: 8px 0;
@@ -1625,6 +1648,7 @@
   color: #334155;
   font-weight: 700;
   font-size: 0.9rem;
+  white-space: nowrap;
 }
 
 .patient-profile-field-value {

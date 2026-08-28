@@ -58,7 +58,7 @@ function Home() {
     }
 
     if (userTypeId === 1) {
-      return card.path === "/patients";
+      return card.path === "/patients" || card.path === "/users";
     }
 
     return false;

@@ -11,6 +11,7 @@ import Navbar from "./components/Navbar";
 import Login from "./routes/Login";
 import Users from "./routes/Users";
 import Assessments from "./routes/Assessments";
+import QuestionTypes from "./routes/QuestionTypes";
 import Patients from "./routes/Patients";
 import Companies from "./routes/Companies";
 import AssessmentDetails from "./routes/AssessmentDetails";
@@ -80,7 +81,7 @@ const canAccessPath = (userTypeId, pathname) => {
   }
 
   if (userTypeId === 1) {
-    return pathname === "/" || pathname === "/patients";
+    return pathname === "/" || pathname === "/patients" || pathname === "/users";
   }
 
   return false;
@@ -541,6 +542,7 @@ const router = createBrowserRouter([
         children: [
           { path: "/", element: <Home /> },
           { path: "assessments", element: <Assessments /> },
+          { path: "question-types", element: <QuestionTypes /> },
           { path: "assessment-details", element: <AssessmentDetails /> },
           { path: "assessment-details/:id", element: <AssessmentDetails /> },
           { path: "activities", element: <Activities /> },

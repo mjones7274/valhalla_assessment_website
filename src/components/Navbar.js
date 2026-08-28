@@ -33,7 +33,7 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel }) {
 
     if (userTypeId === 3) return true;
     if (userTypeId === 2) return item.path === "/" || item.path === "/patients" || item.path === "/users";
-    if (userTypeId === 1) return item.path === "/" || item.path === "/patients";
+    if (userTypeId === 1) return item.path === "/" || item.path === "/patients" || item.path === "/users";
 
     return false;
   });

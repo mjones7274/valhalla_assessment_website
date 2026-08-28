@@ -120,7 +120,15 @@ function Assessments() {
   return (
     <div className="assessments-page">
       <div className="assessments-wrapper">
-        <h2 className="assessments-title">Assessments</h2>
+        <div className="assessments-header-row">
+          <h2 className="assessments-title">Assessments</h2>
+          <button
+            className="assessments-action-btn assessments-action-btn-secondary"
+            onClick={() => navigate("/question-types")}
+          >
+            Question Types
+          </button>
+        </div>
 
         <div className="assessments-toolbar">
           <input

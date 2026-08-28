@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import QuestionModal from "./QuestionModal";
+import QuestionTranslationFields from "./QuestionTranslationFields";
 import RunAssessment from "./RunAssessment";
 import CognitrackXReportExample from "./CognitrackXReportExample";
 import html2canvas from "html2canvas";
@@ -11,9 +12,94 @@ import { replacePatientText, shouldUseClientTerminology } from "../uiTerminology
 
 // Font Awesome
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faEye, faEdit, faTrash, faChevronDown, faChevronRight  } from "@fortawesome/free-solid-svg-icons";
+import { faEye, faEdit, faTrash, faChevronDown, faChevronRight, faLanguage } from "@fortawesome/free-solid-svg-icons";
 
 const calculationRuleFieldOrder = ["rule_id", "type", "qid_1", "qid_2"];
+const LANGUAGES_API = `${process.env.REACT_APP_API_URL_BASE}/api/languages/`;
+const ASSESSMENT_TRANSLATIONS_API = `${process.env.REACT_APP_API_URL_BASE}/api/assessment-translations`;
+const SECTION_TRANSLATIONS_API = `${process.env.REACT_APP_API_URL_BASE}/api/section-translations`;
+const QUESTION_TRANSLATIONS_API = `${process.env.REACT_APP_API_URL_BASE}/api/question-translations`;
+const translationFieldLabels = {
+  name: "Name",
+  description: "Description",
+  patient_title: "Patient Title",
+  patient_instructions: "Patient Instructions",
+};
+const sectionTranslationFieldLabels = {
+  title: "Title",
+  description: "Description",
+  instructions: "Instructions",
+};
+
+const emptyAssessmentTranslation = {
+  assessment_translation_id: null,
+  language_code: "",
+  assessment_id: null,
+  name: "",
+  description: "",
+  patient_title: "",
+  patient_instructions: "",
+};
+const emptySectionTranslation = {
+  section_translation_id: null,
+  language_code: "",
+  section_id: null,
+  title: "",
+  description: "",
+  instructions: "",
+};
+const emptyQuestionTranslation = {
+  question_translation_id: null,
+  language_code: "",
+  question_id: null,
+  title: "",
+  question: "",
+  hyperlink: "",
+  is_active: true,
+  question_type_id: "",
+  use_default_options: false,
+  choices: [],
+  choices_json: "",
+};
+const questionTranslationMetaFields = new Set([
+  "question_translation_id",
+  "language_code",
+  "question_id",
+]);
+const questionTranslationCreateFields = ["title", "question", "choices", "hyperlink"];
+
+const parseApiErrorMessage = (errorBody, fallbackMessage) => {
+  if (!errorBody) {
+    return fallbackMessage;
+  }
+
+  try {
+    const parsedError = JSON.parse(errorBody);
+    if (typeof parsedError === "string") {
+      return parsedError;
+    }
+
+    if (Array.isArray(parsedError)) {
+      return parsedError.join(", ");
+    }
+
+    if (parsedError && typeof parsedError === "object") {
+      return Object.entries(parsedError)
+        .map(([key, value]) => {
+          if (Array.isArray(value)) {
+            return `${key}: ${value.join(", ")}`;
+          }
+
+          return `${key}: ${String(value)}`;
+        })
+        .join(" | ");
+    }
+  } catch {
+    return errorBody;
+  }
+
+  return fallbackMessage;
+};
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -120,7 +206,37 @@ function AssessmentDetails() {
   const [isEditAssessmentOpen, setIsEditAssessmentOpen] = useState(false);
   const [isRunAssessmentOpen, setIsRunAssessmentOpen] = useState(false);
   const [isExampleReportOpen, setIsExampleReportOpen] = useState(false);
+  const [isTranslationsOpen, setIsTranslationsOpen] = useState(false);
+  const [isSectionTranslationsOpen, setIsSectionTranslationsOpen] = useState(false);
+  const [isQuestionTranslationsOpen, setIsQuestionTranslationsOpen] = useState(false);
   const [isDownloadingExampleReport, setIsDownloadingExampleReport] = useState(false);
+  const [languages, setLanguages] = useState([]);
+  const [languagesLoading, setLanguagesLoading] = useState(false);
+  const [selectedLanguageCode, setSelectedLanguageCode] = useState("en");
+  const [translationFormData, setTranslationFormData] = useState(emptyAssessmentTranslation);
+  const [loadingTranslation, setLoadingTranslation] = useState(false);
+  const [savingTranslation, setSavingTranslation] = useState(false);
+  const [translationError, setTranslationError] = useState("");
+  const [translationSuccessMessage, setTranslationSuccessMessage] = useState("");
+  const [activeSectionTranslationTarget, setActiveSectionTranslationTarget] = useState(null);
+  const [selectedSectionLanguageCode, setSelectedSectionLanguageCode] = useState("en");
+  const [sectionTranslationFormData, setSectionTranslationFormData] = useState(emptySectionTranslation);
+  const [isSectionTranslationCreateMode, setIsSectionTranslationCreateMode] = useState(false);
+  const [loadingSectionTranslation, setLoadingSectionTranslation] = useState(false);
+  const [savingSectionTranslation, setSavingSectionTranslation] = useState(false);
+  const [sectionTranslationError, setSectionTranslationError] = useState("");
+  const [sectionTranslationSuccessMessage, setSectionTranslationSuccessMessage] = useState("");
+  const [activeQuestionTranslationTarget, setActiveQuestionTranslationTarget] = useState(null);
+  const [selectedQuestionLanguageCode, setSelectedQuestionLanguageCode] = useState("en");
+  const [questionTranslationFormData, setQuestionTranslationFormData] = useState(emptyQuestionTranslation);
+  const [questionTranslationEditableFields, setQuestionTranslationEditableFields] = useState([]);
+  const [isQuestionTranslationCreateMode, setIsQuestionTranslationCreateMode] = useState(false);
+  const [loadingQuestionTranslation, setLoadingQuestionTranslation] = useState(false);
+  const [savingQuestionTranslation, setSavingQuestionTranslation] = useState(false);
+  const [questionTranslationError, setQuestionTranslationError] = useState("");
+  const [questionTranslationSuccessMessage, setQuestionTranslationSuccessMessage] = useState("");
+  const [runSectionsOverride, setRunSectionsOverride] = useState(null);
+  const [runRequestFnOverride, setRunRequestFnOverride] = useState(null);
   const [runStartQuestionSectionId, setRunStartQuestionSectionId] = useState(null);
   const [runStartQuestionId, setRunStartQuestionId] = useState(null);
   const [runForceConditionalSourceQuestionId, setRunForceConditionalSourceQuestionId] = useState(null);
@@ -157,6 +273,9 @@ function AssessmentDetails() {
 
   const selectedQuestionType = questionTypes.find(
     (qt) => qt.question_type_id === editingQuestion?.question_type_id
+  );
+  const selectedQuestionTranslationType = questionTypes.find(
+    (qt) => Number(qt.question_type_id) === Number(questionTranslationFormData?.question_type_id)
   );
   const navigate = useNavigate();
   const location = useLocation();
@@ -281,6 +400,334 @@ function AssessmentDetails() {
     };
   };
 
+  const fetchQuestionTypesData = async () => {
+    if (Array.isArray(questionTypes) && questionTypes.length) {
+      return questionTypes;
+    }
+
+    const response = await apiRequest(
+      `${process.env.REACT_APP_API_URL_BASE}/api/question-types/`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Load question types failed with status ${response.status}`);
+    }
+
+    const rows = await response.json();
+    const nextTypes = Array.isArray(rows) ? rows : [];
+    setQuestionTypes(nextTypes);
+    return nextTypes;
+  };
+
+  const buildQuestionEditorDraft = ({
+    questionData,
+    typesData,
+    questionSectionId,
+    sectionId,
+    questionOrder,
+    isRequired,
+    includeSumTotal,
+    uniqueCalculation,
+    hasSubquestion,
+    subQuestionType,
+    subQuestionPrompt,
+    translationData = null,
+  }) => {
+    const parsedQuestionOrder = Number(questionOrder);
+    const normalizedQuestionOrder =
+      Number.isFinite(parsedQuestionOrder) && parsedQuestionOrder > 0
+        ? parsedQuestionOrder
+        : undefined;
+    const normalizedIsRequired = Boolean(isRequired);
+    const isMainAssessmentSection = assessmentDetails?.sections?.some(
+      (sec) => Number(sec?.section?.section_id) === Number(sectionId)
+    );
+    const matchingFlowRule = getFlowRuleForQuestion(sectionId, questionData.question_id);
+    const matchValueArray = toFlowRuleMatchValueArray(matchingFlowRule?.match_value);
+    const firstMatchValue = matchValueArray[0] || null;
+    const hydratedConditionalOption = String(firstMatchValue?.option ?? "").trim();
+    const hydratedConditionalValue =
+      firstMatchValue?.value === undefined || firstMatchValue?.value === null
+        ? ""
+        : String(firstMatchValue.value);
+    const hydratedTargetSectionId = Number(
+      matchingFlowRule?.target_section?.section_id ??
+      matchingFlowRule?.target_section_id
+    );
+    const resolvedQuestionTypeId = Number(
+      translationData?.question_type_id ??
+      questionData?.question_type?.question_type_id ??
+      0
+    );
+    const resolvedQuestionType =
+      (typesData || []).find(
+        (typeRow) => Number(typeRow?.question_type_id) === resolvedQuestionTypeId
+      ) || questionData?.question_type;
+    const isSignatureAgreement = isSignatureAgreementQuestionType(
+      resolvedQuestionTypeId,
+      resolvedQuestionType?.description
+    );
+    const resolvedUseDefaultOptions =
+      translationData?.use_default_options ?? questionData?.use_default_options ?? false;
+    const hasTranslatedChoices =
+      translationData && Object.prototype.hasOwnProperty.call(translationData, "choices");
+    const rawChoices = hasTranslatedChoices
+      ? translationData?.choices ?? []
+      : isSignatureAgreement
+        ? questionData?.choices ?? []
+        : resolvedUseDefaultOptions
+          ? resolvedQuestionType?.options || questionData?.question_type?.options || []
+          : questionData?.choices || [];
+
+    return {
+      question_id: questionData.question_id,
+      question_translation_id: translationData?.question_translation_id ?? null,
+      language_code: translationData?.language_code ?? "",
+      question_section_id: questionSectionId,
+      section_id: sectionId,
+      question_order: normalizedQuestionOrder,
+      is_required: normalizedIsRequired,
+      include_sum_total: Boolean(includeSumTotal),
+      unique_calculation: Boolean(uniqueCalculation),
+      has_subquestion: Boolean(hasSubquestion),
+      sub_question_type: (() => {
+        const parsedSubQuestionType = Number(subQuestionType);
+        return Number.isFinite(parsedSubQuestionType) && parsedSubQuestionType > 0
+          ? parsedSubQuestionType
+          : "";
+      })(),
+      sub_question_prompt: String(subQuestionPrompt ?? ""),
+      title: translationData?.title ?? questionData?.title ?? "",
+      question: translationData?.question ?? questionData?.question ?? "",
+      hyperlink: translationData?.hyperlink ?? questionData?.hyperlink ?? "",
+      is_active:
+        translationData?.is_active ??
+        (typeof questionData?.is_active === "boolean" ? questionData.is_active : true),
+      question_type_id: resolvedQuestionTypeId || "",
+      use_default_options: resolvedUseDefaultOptions,
+      choices: isSignatureAgreement
+        ? Array.isArray(rawChoices)
+          ? rawChoices
+          : []
+        : (Array.isArray(rawChoices) ? rawChoices : []).map((choice, index) =>
+            normalizeQuestionChoice(choice, index + 1)
+          ),
+      choices_json: isSignatureAgreement
+        ? serializeQuestionChoicesJson(rawChoices)
+        : "",
+      conditional_response_enabled: Boolean(matchingFlowRule),
+      conditional_response_option: hydratedConditionalOption,
+      conditional_response_value: hydratedConditionalValue,
+      question_flow_rule_id: getFlowRuleId(matchingFlowRule),
+      question_flow_rule_match_value: matchValueArray,
+      target_section_id:
+        Number.isFinite(hydratedTargetSectionId) && hydratedTargetSectionId > 0
+          ? hydratedTargetSectionId
+          : "",
+      original_target_section_id:
+        Number.isFinite(hydratedTargetSectionId) && hydratedTargetSectionId > 0
+          ? hydratedTargetSectionId
+          : "",
+      hide_conditional_response_controls: !isMainAssessmentSection,
+    };
+  };
+
+  const getQuestionTranslationEditableFields = (translationData) => {
+    if (!translationData || typeof translationData !== "object") {
+      return [];
+    }
+
+    return Object.keys(translationData).filter((field) => !questionTranslationMetaFields.has(field));
+  };
+
+  const clearRunAssessmentPreviewOverrides = () => {
+    setRunSectionsOverride(null);
+    setRunRequestFnOverride(null);
+  };
+
+  const buildQuestionTranslationPreviewPatch = () => {
+    const editableFieldSet = new Set(questionTranslationEditableFields);
+    const selectedType = questionTypes.find(
+      (typeRow) => Number(typeRow?.question_type_id) === Number(questionTranslationFormData?.question_type_id)
+    );
+    const isSignatureAgreement = isSignatureAgreementQuestionType(
+      questionTranslationFormData?.question_type_id,
+      selectedType?.description
+    );
+    const nextPatch = {};
+
+    if (editableFieldSet.has("title")) {
+      nextPatch.title = questionTranslationFormData.title;
+    }
+    if (editableFieldSet.has("question")) {
+      nextPatch.question = questionTranslationFormData.question;
+    }
+    if (editableFieldSet.has("is_active")) {
+      nextPatch.is_active = questionTranslationFormData.is_active;
+    }
+    if (editableFieldSet.has("question_type_id")) {
+      nextPatch.question_type_id = questionTranslationFormData.question_type_id;
+      if (selectedType) {
+        nextPatch.question_type = {
+          ...selectedType,
+        };
+      }
+    }
+    if (editableFieldSet.has("use_default_options")) {
+      nextPatch.use_default_options = questionTranslationFormData.use_default_options;
+    }
+    if (editableFieldSet.has("hyperlink")) {
+      nextPatch.hyperlink = String(questionTranslationFormData.hyperlink ?? "").trim();
+    }
+    if (editableFieldSet.has("choices")) {
+      if (isSignatureAgreement) {
+        const rawChoicesJson = String(questionTranslationFormData.choices_json ?? "").trim();
+        if (!rawChoicesJson) {
+          nextPatch.choices = [];
+        } else {
+          try {
+            nextPatch.choices = JSON.parse(rawChoicesJson);
+          } catch {
+            return {
+              error: "Signature agreement choices must be valid JSON.",
+            };
+          }
+        }
+      } else {
+        nextPatch.choices = normalizeQuestionChoicesForSave(questionTranslationFormData.choices);
+      }
+    }
+
+    return {
+      patch: nextPatch,
+    };
+  };
+
+  const applyQuestionPreviewPatch = (question, patch) => {
+    const nextQuestion = {
+      ...(question || {}),
+      ...patch,
+    };
+
+    if (patch?.question_type && !patch?.question_type_id) {
+      nextQuestion.question_type = patch.question_type;
+    }
+
+    return nextQuestion;
+  };
+
+  const handleShowQuestionTranslationPreview = () => {
+    if (!activeQuestionTranslationTarget?.question_id) {
+      return;
+    }
+
+    const previewResult = buildQuestionTranslationPreviewPatch();
+    if (previewResult?.error) {
+      setQuestionTranslationError(previewResult.error);
+      setQuestionTranslationSuccessMessage("");
+      return;
+    }
+
+    const previewPatch = previewResult?.patch ?? {};
+    const targetQuestionId = Number(activeQuestionTranslationTarget.question_id);
+    const previewSections = groupedSections.map((section) => ({
+      ...section,
+      questions: (section.questions || []).map((questionSection) => {
+        const currentQuestionId = Number(
+          questionSection?.question?.question_id ??
+            questionSection?.question_id ??
+            questionSection?.question_section?.question_id ??
+            0
+        );
+
+        if (currentQuestionId !== targetQuestionId) {
+          return questionSection;
+        }
+
+        return {
+          ...questionSection,
+          question: applyQuestionPreviewPatch(questionSection?.question, previewPatch),
+        };
+      }),
+    }));
+
+    const previewRequestFn = async (pathOrUrl, options = {}) => {
+      const response = await apiRequest(pathOrUrl, options);
+      const method = String(options?.method || "GET").toUpperCase();
+      const requestTarget = String(pathOrUrl || "");
+
+      if (
+        method !== "GET" ||
+        !response.ok ||
+        !requestTarget.includes("/api/question-sections/")
+      ) {
+        return response;
+      }
+
+      try {
+        const payload = await response.clone().json();
+        const rows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.results)
+            ? payload.results
+            : null;
+
+        if (!rows) {
+          return response;
+        }
+
+        const patchedRows = rows.map((questionSection) => {
+          const currentQuestionId = Number(
+            questionSection?.question?.question_id ??
+              questionSection?.question_id ??
+              questionSection?.question_section?.question_id ??
+              0
+          );
+
+          if (currentQuestionId !== targetQuestionId) {
+            return questionSection;
+          }
+
+          return {
+            ...questionSection,
+            question: applyQuestionPreviewPatch(questionSection?.question, previewPatch),
+          };
+        });
+
+        const nextPayload = Array.isArray(payload)
+          ? patchedRows
+          : {
+              ...payload,
+              results: patchedRows,
+            };
+
+        return new Response(JSON.stringify(nextPayload), {
+          status: response.status,
+          statusText: response.statusText,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      } catch {
+        return response;
+      }
+    };
+
+    setQuestionTranslationError("");
+    setQuestionTranslationSuccessMessage("");
+    setRunSectionsOverride(previewSections);
+    setRunRequestFnOverride(() => previewRequestFn);
+    setRunStartQuestionSectionId(activeQuestionTranslationTarget.question_section_id ?? null);
+    setRunStartQuestionId(activeQuestionTranslationTarget.question_id ?? null);
+    setRunForceConditionalSourceQuestionId(
+      activeQuestionTranslationTarget.force_conditional_source_question_id ?? null
+    );
+    setRunForceConditionalTargetSectionId(
+      activeQuestionTranslationTarget.force_conditional_target_section_id ?? null
+    );
+    setIsRunAssessmentOpen(true);
+  };
+
   useEffect(() => {
     const fetchAssessmentDetails = async () => {
       setLoading(true);
@@ -293,7 +740,7 @@ function AssessmentDetails() {
         `/api/assessments/${id}/`;
       const questionSectionsUrl =
         process.env.REACT_APP_API_URL_BASE +
-        `/api/question-sections/`;
+        `/api/question-sections/?assessment_id=${id}`;
 
       try {
         const [res, assessmentRes, questionSectionsRes] = await Promise.all([
@@ -398,6 +845,339 @@ function AssessmentDetails() {
       .then(setQuestionTypes)
       .catch(console.error);
   }, [navigate, id]);
+
+  useEffect(() => {
+    if ((!isTranslationsOpen && !isSectionTranslationsOpen && !isQuestionTranslationsOpen) || languages.length > 0) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchLanguages = async () => {
+      setLanguagesLoading(true);
+      try {
+        const response = await apiRequest(LANGUAGES_API);
+        if (!response.ok) {
+          throw new Error(`Load languages failed with status ${response.status}`);
+        }
+
+        const rows = await response.json();
+        if (!isCancelled) {
+          setLanguages(Array.isArray(rows) ? rows : []);
+          setTranslationSuccessMessage("");
+          setSectionTranslationSuccessMessage("");
+          setQuestionTranslationSuccessMessage("");
+        }
+      } catch (error) {
+        console.error("Failed to load languages", error);
+        if (!isCancelled) {
+          setLanguages([]);
+          if (isTranslationsOpen) {
+            setTranslationError("Unable to load languages right now.");
+          }
+          if (isSectionTranslationsOpen) {
+            setSectionTranslationError("Unable to load languages right now.");
+          }
+          if (isQuestionTranslationsOpen) {
+            setQuestionTranslationError("Unable to load languages right now.");
+          }
+        }
+      } finally {
+        if (!isCancelled) {
+          setLanguagesLoading(false);
+        }
+      }
+    };
+
+    fetchLanguages();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isQuestionTranslationsOpen, isSectionTranslationsOpen, isTranslationsOpen, languages.length]);
+
+  useEffect(() => {
+    if (!isTranslationsOpen) {
+      return;
+    }
+
+    if (selectedLanguageCode === "en") {
+      setTranslationFormData({
+        ...emptyAssessmentTranslation,
+        language_code: "en",
+        assessment_id: Number(id),
+      });
+      setTranslationError("");
+      setTranslationSuccessMessage("");
+      setLoadingTranslation(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchTranslation = async () => {
+      setLoadingTranslation(true);
+      setTranslationError("");
+      setTranslationSuccessMessage("");
+
+      try {
+        const response = await apiRequest(
+          `${ASSESSMENT_TRANSLATIONS_API}?language_code=${encodeURIComponent(selectedLanguageCode)}&assessment_id=${encodeURIComponent(id)}`
+        );
+
+        if (!response.ok) {
+          throw new Error(`Load translation failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const rows = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.results)
+            ? data.results
+            : [];
+        const translation = rows[0] || null;
+
+        if (!isCancelled) {
+          if (translation) {
+            setTranslationFormData({
+              ...emptyAssessmentTranslation,
+              ...translation,
+            });
+          } else {
+            setTranslationFormData({
+              ...emptyAssessmentTranslation,
+              language_code: selectedLanguageCode,
+              assessment_id: Number(id),
+            });
+            setTranslationError("No assessment translation exists for the selected language yet.");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load assessment translation", error);
+        if (!isCancelled) {
+          setTranslationFormData({
+            ...emptyAssessmentTranslation,
+            language_code: selectedLanguageCode,
+            assessment_id: Number(id),
+          });
+          setTranslationError("Unable to load the assessment translation right now.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingTranslation(false);
+        }
+      }
+    };
+
+    fetchTranslation();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [id, isTranslationsOpen, selectedLanguageCode]);
+
+  useEffect(() => {
+    if (!isSectionTranslationsOpen || !activeSectionTranslationTarget?.section_id) {
+      return;
+    }
+
+    if (selectedSectionLanguageCode === "en") {
+      setSectionTranslationFormData({
+        ...emptySectionTranslation,
+        language_code: "en",
+        section_id: Number(activeSectionTranslationTarget.section_id),
+      });
+      setIsSectionTranslationCreateMode(false);
+      setSectionTranslationError("");
+      setSectionTranslationSuccessMessage("");
+      setLoadingSectionTranslation(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchSectionTranslation = async () => {
+      setLoadingSectionTranslation(true);
+      setSectionTranslationError("");
+      setSectionTranslationSuccessMessage("");
+
+      try {
+        const response = await apiRequest(
+          `${SECTION_TRANSLATIONS_API}?language_code=${encodeURIComponent(selectedSectionLanguageCode)}&section_id=${encodeURIComponent(activeSectionTranslationTarget.section_id)}`
+        );
+
+        if (!response.ok) {
+          throw new Error(`Load section translation failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const rows = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.results)
+            ? data.results
+            : [];
+        const translation = rows[0] || null;
+
+        if (!isCancelled) {
+          if (translation) {
+            setSectionTranslationFormData({
+              ...emptySectionTranslation,
+              ...translation,
+              instructions: translation?.instructions ?? "",
+            });
+            setIsSectionTranslationCreateMode(false);
+          } else {
+            setSectionTranslationFormData({
+              ...emptySectionTranslation,
+              language_code: selectedSectionLanguageCode,
+              section_id: Number(activeSectionTranslationTarget.section_id),
+              title: String(activeSectionTranslationTarget?.title ?? ""),
+              description: String(activeSectionTranslationTarget?.description ?? ""),
+              instructions: String(activeSectionTranslationTarget?.instructions ?? ""),
+            });
+            setIsSectionTranslationCreateMode(true);
+            setSectionTranslationError("");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load section translation", error);
+        if (!isCancelled) {
+          setSectionTranslationFormData({
+            ...emptySectionTranslation,
+            language_code: selectedSectionLanguageCode,
+            section_id: Number(activeSectionTranslationTarget.section_id),
+          });
+          setIsSectionTranslationCreateMode(false);
+          setSectionTranslationError("Unable to load the section translation right now.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingSectionTranslation(false);
+        }
+      }
+    };
+
+    fetchSectionTranslation();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeSectionTranslationTarget, isSectionTranslationsOpen, selectedSectionLanguageCode]);
+
+  useEffect(() => {
+    if (!isQuestionTranslationsOpen || !activeQuestionTranslationTarget?.question_id) {
+      return;
+    }
+
+    if (selectedQuestionLanguageCode === "en") {
+      setQuestionTranslationFormData({
+        ...emptyQuestionTranslation,
+        language_code: "en",
+        question_id: Number(activeQuestionTranslationTarget.question_id),
+      });
+      setQuestionTranslationEditableFields([]);
+      setIsQuestionTranslationCreateMode(false);
+      setQuestionTranslationError("");
+      setQuestionTranslationSuccessMessage("");
+      setLoadingQuestionTranslation(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchQuestionTranslation = async () => {
+      setLoadingQuestionTranslation(true);
+      setQuestionTranslationError("");
+      setQuestionTranslationSuccessMessage("");
+
+      try {
+        const typesData = await fetchQuestionTypesData();
+        const questionResponse = await apiRequest(
+          `${process.env.REACT_APP_API_URL_BASE}/api/questions/${activeQuestionTranslationTarget.question_id}/`
+        );
+
+        if (!questionResponse.ok) {
+          throw new Error(`Load question failed with status ${questionResponse.status}`);
+        }
+
+        const questionData = await questionResponse.json();
+        const translationResponse = await apiRequest(
+          `${QUESTION_TRANSLATIONS_API}?language_code=${encodeURIComponent(selectedQuestionLanguageCode)}&question_id=${encodeURIComponent(activeQuestionTranslationTarget.question_id)}`
+        );
+
+        if (!translationResponse.ok) {
+          throw new Error(`Load question translation failed with status ${translationResponse.status}`);
+        }
+
+        const translationPayload = await translationResponse.json();
+        const translationRows = Array.isArray(translationPayload)
+          ? translationPayload
+          : Array.isArray(translationPayload?.results)
+            ? translationPayload.results
+            : [];
+        const translation = translationRows[0] || null;
+        const nextDraft = buildQuestionEditorDraft({
+          questionData,
+          typesData,
+          questionSectionId: activeQuestionTranslationTarget.question_section_id,
+          sectionId: activeQuestionTranslationTarget.section_id,
+          questionOrder: activeQuestionTranslationTarget.question_order,
+          isRequired: activeQuestionTranslationTarget.is_required,
+          includeSumTotal: activeQuestionTranslationTarget.include_sum_total,
+          uniqueCalculation: activeQuestionTranslationTarget.unique_calculation,
+          hasSubquestion: activeQuestionTranslationTarget.has_subquestion,
+          subQuestionType: activeQuestionTranslationTarget.sub_question_type,
+          subQuestionPrompt: activeQuestionTranslationTarget.sub_question_prompt,
+          translationData: translation,
+        });
+
+        if (!isCancelled) {
+          setQuestionTranslationFormData(nextDraft);
+          setQuestionTranslationEditableFields(
+            translation
+              ? getQuestionTranslationEditableFields(translation)
+              : questionTranslationCreateFields
+          );
+          setIsQuestionTranslationCreateMode(!translation);
+
+          if (!translation) {
+            setQuestionTranslationError("");
+            setQuestionTranslationFormData((prev) => ({
+              ...prev,
+              language_code: selectedQuestionLanguageCode,
+              question_id: Number(activeQuestionTranslationTarget.question_id),
+              hyperlink: String(questionData?.hyperlink ?? ""),
+              choices_json: serializeQuestionChoicesJson(questionData?.choices ?? prev?.choices ?? []),
+            }));
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load question translation", error);
+        if (!isCancelled) {
+          setQuestionTranslationFormData({
+            ...emptyQuestionTranslation,
+            language_code: selectedQuestionLanguageCode,
+            question_id: Number(activeQuestionTranslationTarget.question_id),
+          });
+          setQuestionTranslationEditableFields([]);
+          setIsQuestionTranslationCreateMode(false);
+          setQuestionTranslationError("Unable to load the question translation right now.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingQuestionTranslation(false);
+        }
+      }
+    };
+
+    fetchQuestionTranslation();
+
+    return () => {
+      isCancelled = true;
+    };
+    // The fetch trigger is modal state plus selected language and target ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeQuestionTranslationTarget, isQuestionTranslationsOpen, selectedQuestionLanguageCode]);
 
   useEffect(() => {
     const targetSectionIds = Array.from(
@@ -1660,6 +2440,438 @@ const compareQuestionOrder = (left, right) => {
     }
   };
 
+  const openTranslationsModal = () => {
+    setSelectedLanguageCode("en");
+    setTranslationFormData({
+      ...emptyAssessmentTranslation,
+      language_code: "en",
+      assessment_id: Number(id),
+    });
+    setTranslationError("");
+    setTranslationSuccessMessage("");
+    setIsTranslationsOpen(true);
+  };
+
+  const closeTranslationsModal = () => {
+    setIsTranslationsOpen(false);
+    setSelectedLanguageCode("en");
+    setTranslationFormData({
+      ...emptyAssessmentTranslation,
+      language_code: "en",
+      assessment_id: Number(id),
+    });
+    setTranslationError("");
+    setTranslationSuccessMessage("");
+    setLoadingTranslation(false);
+    setSavingTranslation(false);
+  };
+
+  const openSectionTranslationsModal = (section) => {
+    setActiveSectionTranslationTarget({
+      section_id: Number(section?.section_id ?? 0) || null,
+      title: section?.title || "",
+      description: section?.description || "",
+      instructions: section?.instructions || "",
+    });
+    setSelectedSectionLanguageCode("en");
+    setSectionTranslationFormData({
+      ...emptySectionTranslation,
+      language_code: "en",
+      section_id: Number(section?.section_id ?? 0) || null,
+    });
+    setIsSectionTranslationCreateMode(false);
+    setSectionTranslationError("");
+    setSectionTranslationSuccessMessage("");
+    setIsSectionTranslationsOpen(true);
+  };
+
+  const closeSectionTranslationsModal = () => {
+    setIsSectionTranslationsOpen(false);
+    setActiveSectionTranslationTarget(null);
+    setSelectedSectionLanguageCode("en");
+    setSectionTranslationFormData({
+      ...emptySectionTranslation,
+      language_code: "en",
+      section_id: null,
+    });
+    setIsSectionTranslationCreateMode(false);
+    setSectionTranslationError("");
+    setSectionTranslationSuccessMessage("");
+    setLoadingSectionTranslation(false);
+    setSavingSectionTranslation(false);
+  };
+
+  const openQuestionTranslationsModal = (questionContext) => {
+    setActiveQuestionTranslationTarget({
+      question_id: Number(questionContext?.question_id ?? 0) || null,
+      question_section_id: Number(questionContext?.question_section_id ?? 0) || null,
+      section_id: Number(questionContext?.section_id ?? 0) || null,
+      question_order: questionContext?.question_order,
+      is_required: Boolean(questionContext?.is_required),
+      include_sum_total: Boolean(questionContext?.include_sum_total),
+      unique_calculation: Boolean(questionContext?.unique_calculation),
+      has_subquestion: Boolean(questionContext?.has_subquestion),
+      sub_question_type: questionContext?.sub_question_type,
+      sub_question_prompt: questionContext?.sub_question_prompt ?? "",
+      title: questionContext?.title || "",
+      force_conditional_source_question_id:
+        Number(questionContext?.force_conditional_source_question_id ?? 0) || null,
+      force_conditional_target_section_id:
+        Number(questionContext?.force_conditional_target_section_id ?? 0) || null,
+    });
+    setSelectedQuestionLanguageCode("en");
+    setQuestionTranslationFormData({
+      ...emptyQuestionTranslation,
+      language_code: "en",
+      question_id: Number(questionContext?.question_id ?? 0) || null,
+    });
+    setQuestionTranslationEditableFields([]);
+    setIsQuestionTranslationCreateMode(false);
+    setQuestionTranslationError("");
+    setQuestionTranslationSuccessMessage("");
+    setIsQuestionTranslationsOpen(true);
+  };
+
+  const closeQuestionTranslationsModal = () => {
+    setIsQuestionTranslationsOpen(false);
+    setActiveQuestionTranslationTarget(null);
+    setSelectedQuestionLanguageCode("en");
+    setQuestionTranslationFormData({
+      ...emptyQuestionTranslation,
+      language_code: "en",
+      question_id: null,
+    });
+    setQuestionTranslationEditableFields([]);
+    setIsQuestionTranslationCreateMode(false);
+    setQuestionTranslationError("");
+    setQuestionTranslationSuccessMessage("");
+    setLoadingQuestionTranslation(false);
+    setSavingQuestionTranslation(false);
+  };
+
+  const handleCloseRunAssessment = () => {
+    setIsRunAssessmentOpen(false);
+    clearRunAssessmentPreviewOverrides();
+  };
+
+  const handleTranslationFieldChange = (field, value) => {
+    setTranslationSuccessMessage("");
+    setTranslationFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSectionTranslationFieldChange = (field, value) => {
+    setSectionTranslationSuccessMessage("");
+    setSectionTranslationFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSaveAssessmentTranslation = async () => {
+    const translationId = Number(translationFormData?.assessment_translation_id ?? 0);
+
+    if (!translationId) {
+      setTranslationError("A translation record is required before changes can be saved.");
+      setTranslationSuccessMessage("");
+      return;
+    }
+
+    setSavingTranslation(true);
+    setTranslationError("");
+    setTranslationSuccessMessage("");
+
+    try {
+      const payload = {
+        name: translationFormData.name,
+        description: translationFormData.description,
+        patient_title: translationFormData.patient_title,
+        patient_instructions: translationFormData.patient_instructions,
+      };
+
+      const response = await apiRequest(
+        `${ASSESSMENT_TRANSLATIONS_API}/${translationId}/`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        let errorMessage = "";
+
+        if (errorBody) {
+          try {
+            const parsedError = JSON.parse(errorBody);
+            if (typeof parsedError === "string") {
+              errorMessage = parsedError;
+            } else if (Array.isArray(parsedError)) {
+              errorMessage = parsedError.join(", ");
+            } else if (parsedError && typeof parsedError === "object") {
+              errorMessage = Object.entries(parsedError)
+                .map(([key, value]) => {
+                  if (Array.isArray(value)) {
+                    return `${key}: ${value.join(", ")}`;
+                  }
+
+                  return `${key}: ${String(value)}`;
+                })
+                .join(" | ");
+            }
+          } catch {
+            errorMessage = errorBody;
+          }
+        }
+
+        throw new Error(
+          errorMessage || `Update assessment translation failed with status ${response.status}`
+        );
+      }
+
+      const updated = await response.json();
+      setTranslationFormData((prev) => ({
+        ...prev,
+        ...updated,
+      }));
+      setTranslationSuccessMessage("Translation saved successfully.");
+    } catch (error) {
+      console.error("Failed to save assessment translation", error);
+      setTranslationError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to save translation changes right now."
+      );
+    } finally {
+      setSavingTranslation(false);
+    }
+  };
+
+  const handleSaveSectionTranslation = async () => {
+    const translationId = Number(sectionTranslationFormData?.section_translation_id ?? 0);
+
+    setSavingSectionTranslation(true);
+    setSectionTranslationError("");
+    setSectionTranslationSuccessMessage("");
+
+    try {
+      const payload = {
+        title: sectionTranslationFormData.title,
+        description: sectionTranslationFormData.description,
+        instructions: sectionTranslationFormData.instructions,
+      };
+
+      const response = await apiRequest(
+        isSectionTranslationCreateMode
+          ? `${SECTION_TRANSLATIONS_API}/`
+          : `${SECTION_TRANSLATIONS_API}/${translationId}/`,
+        {
+          method: isSectionTranslationCreateMode ? "POST" : "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isSectionTranslationCreateMode
+              ? {
+                  ...payload,
+                  section_id: sectionTranslationFormData.section_id,
+                  language_code: sectionTranslationFormData.language_code,
+                }
+              : payload
+          ),
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(
+          parseApiErrorMessage(
+            errorBody,
+            `${isSectionTranslationCreateMode ? "Create" : "Update"} section translation failed with status ${response.status}`
+          )
+        );
+      }
+
+      const updated = await response.json();
+      setSectionTranslationFormData((prev) => ({
+        ...prev,
+        ...updated,
+        instructions: updated?.instructions ?? "",
+      }));
+      setIsSectionTranslationCreateMode(false);
+      setSectionTranslationSuccessMessage(
+        isSectionTranslationCreateMode
+          ? "Section translation created successfully."
+          : "Section translation saved successfully."
+      );
+    } catch (error) {
+      console.error("Failed to save section translation", error);
+      setSectionTranslationError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to save section translation changes right now."
+      );
+    } finally {
+      setSavingSectionTranslation(false);
+    }
+  };
+
+  const handleSaveQuestionTranslation = async () => {
+    const translationId = Number(questionTranslationFormData?.question_translation_id ?? 0);
+
+    setSavingQuestionTranslation(true);
+    setQuestionTranslationError("");
+    setQuestionTranslationSuccessMessage("");
+
+    try {
+      const editableFieldSet = new Set(questionTranslationEditableFields);
+      const selectedType = questionTypes.find(
+        (typeRow) => Number(typeRow?.question_type_id) === Number(questionTranslationFormData.question_type_id)
+      );
+      const normalizedSelectedType = normalizeQuestionTypeDescription(
+        selectedType?.description
+      );
+      const isPerformTaskVideo = normalizedSelectedType === "perform_task_video";
+      const isSignatureAgreement = isSignatureAgreementQuestionType(
+        questionTranslationFormData.question_type_id,
+        selectedType?.description
+      );
+      let serializedSignatureAgreementChoices = questionTranslationFormData.choices;
+      let serializedChoicesForCreate = [];
+
+      if (isQuestionTranslationCreateMode) {
+        const rawChoicesJson = String(questionTranslationFormData.choices_json ?? "").trim();
+
+        if (!rawChoicesJson) {
+          serializedChoicesForCreate = [];
+        } else {
+          try {
+            serializedChoicesForCreate = JSON.parse(rawChoicesJson);
+          } catch {
+            setQuestionTranslationError("Choices must be valid JSON.");
+            return;
+          }
+        }
+      }
+
+      if (editableFieldSet.has("choices") && isSignatureAgreement) {
+        const rawChoicesJson = String(questionTranslationFormData.choices_json ?? "").trim();
+
+        if (!rawChoicesJson) {
+          serializedSignatureAgreementChoices = [];
+        } else {
+          try {
+            serializedSignatureAgreementChoices = JSON.parse(rawChoicesJson);
+          } catch {
+            setQuestionTranslationError("Signature agreement choices must be valid JSON.");
+            return;
+          }
+        }
+      }
+
+      const payload = {};
+
+      if (editableFieldSet.has("title")) {
+        payload.title = questionTranslationFormData.title;
+      }
+      if (editableFieldSet.has("question")) {
+        payload.question = questionTranslationFormData.question;
+      }
+      if (editableFieldSet.has("is_active")) {
+        payload.is_active = questionTranslationFormData.is_active;
+      }
+      if (editableFieldSet.has("question_type_id")) {
+        payload.question_type_id = questionTranslationFormData.question_type_id;
+      }
+      if (editableFieldSet.has("use_default_options")) {
+        payload.use_default_options = questionTranslationFormData.use_default_options;
+      }
+      if (editableFieldSet.has("choices")) {
+        payload.choices = isSignatureAgreement
+          ? serializedSignatureAgreementChoices
+          : normalizeQuestionChoicesForSave(questionTranslationFormData.choices);
+      }
+      if (editableFieldSet.has("hyperlink") && (isPerformTaskVideo || isSignatureAgreement)) {
+        payload.hyperlink = String(questionTranslationFormData.hyperlink ?? "").trim();
+      }
+
+      const requestPath = isQuestionTranslationCreateMode
+        ? `${QUESTION_TRANSLATIONS_API}/`
+        : `${QUESTION_TRANSLATIONS_API}/${translationId}/`;
+      const requestMethod = isQuestionTranslationCreateMode ? "POST" : "PATCH";
+
+      if (isQuestionTranslationCreateMode) {
+        payload.title = questionTranslationFormData.title;
+        payload.question = questionTranslationFormData.question;
+        payload.choices = serializedChoicesForCreate;
+        payload.hyperlink = String(questionTranslationFormData.hyperlink ?? "").trim();
+        payload.question_id = questionTranslationFormData.question_id;
+        payload.language_code = questionTranslationFormData.language_code;
+      }
+
+      const response = await apiRequest(requestPath, {
+        method: requestMethod,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(
+          parseApiErrorMessage(
+            errorBody,
+            `${isQuestionTranslationCreateMode ? "Create" : "Update"} question translation failed with status ${response.status}`
+          )
+        );
+      }
+
+      const updated = await response.json();
+      const typesData = await fetchQuestionTypesData();
+      const baseQuestionResponse = await apiRequest(
+        `${process.env.REACT_APP_API_URL_BASE}/api/questions/${questionTranslationFormData.question_id}/`
+      );
+
+      if (!baseQuestionResponse.ok) {
+        throw new Error(`Reload question failed with status ${baseQuestionResponse.status}`);
+      }
+
+      const questionData = await baseQuestionResponse.json();
+      const nextDraft = buildQuestionEditorDraft({
+        questionData,
+        typesData,
+        questionSectionId: activeQuestionTranslationTarget?.question_section_id,
+        sectionId: activeQuestionTranslationTarget?.section_id,
+        questionOrder: activeQuestionTranslationTarget?.question_order,
+        isRequired: activeQuestionTranslationTarget?.is_required,
+        includeSumTotal: activeQuestionTranslationTarget?.include_sum_total,
+        uniqueCalculation: activeQuestionTranslationTarget?.unique_calculation,
+        hasSubquestion: activeQuestionTranslationTarget?.has_subquestion,
+        subQuestionType: activeQuestionTranslationTarget?.sub_question_type,
+        subQuestionPrompt: activeQuestionTranslationTarget?.sub_question_prompt,
+        translationData: updated,
+      });
+
+      setQuestionTranslationFormData(nextDraft);
+      setQuestionTranslationEditableFields(getQuestionTranslationEditableFields(updated));
+      setIsQuestionTranslationCreateMode(false);
+      setQuestionTranslationSuccessMessage(
+        isQuestionTranslationCreateMode
+          ? "Question translation created successfully."
+          : "Question translation saved successfully."
+      );
+    } catch (error) {
+      console.error("Failed to save question translation", error);
+      setQuestionTranslationError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to save question translation changes right now."
+      );
+    } finally {
+      setSavingQuestionTranslation(false);
+    }
+  };
+
   const handleDownloadExampleReportPdf = async () => {
     const reportElement = exampleReportRef.current;
     if (!reportElement || isDownloadingExampleReport) return;
@@ -1772,6 +2984,7 @@ const compareQuestionOrder = (left, right) => {
         >
           <button
             onClick={() => {
+              clearRunAssessmentPreviewOverrides();
               setRunStartQuestionSectionId(null);
               setRunStartQuestionId(null);
               setRunForceConditionalSourceQuestionId(null);
@@ -1789,6 +3002,20 @@ const compareQuestionOrder = (left, right) => {
             }}
           >
             Run This Assessment
+          </button>
+          <button
+            onClick={openTranslationsModal}
+            style={{
+              padding: "8px 16px",
+              background: "#0f766e",
+              color: "#fff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: 400,
+            }}
+          >
+            Language Translations
           </button>
           <button
             onClick={() => setIsExampleReportOpen(true)}
@@ -1920,6 +3147,17 @@ const compareQuestionOrder = (left, right) => {
                         is_conditional: Boolean(section.is_conditional),
                       });
                       setIsNewSectionOpen(true);
+                    }}
+                  />
+
+                  <FontAwesomeIcon
+                    icon={faLanguage}
+                    title={`Translate ${section.title} section`}
+                    onClick={() => openSectionTranslationsModal(section)}
+                    style={{
+                      cursor: "pointer",
+                      color: "#0f766e",
+                      fontSize: "1.2rem",
                     }}
                   />
 
@@ -2257,6 +3495,7 @@ const compareQuestionOrder = (left, right) => {
                             title="View question"
                             style={viewIconStyle}
                             onClick={() => {
+                              clearRunAssessmentPreviewOverrides();
                               setRunStartQuestionSectionId(qs.question_section_id);
                               setRunStartQuestionId(qs.question.question_id);
                               setRunForceConditionalSourceQuestionId(null);
@@ -2282,6 +3521,30 @@ const compareQuestionOrder = (left, right) => {
                                 getQuestionSectionForeignKeyId(qs, "sub_question_type"),
                                 qs?.sub_question_prompt ?? qs?.question_section?.sub_question_prompt ?? ""
                               )
+                            }
+                          />
+
+                          <FontAwesomeIcon
+                            icon={faLanguage}
+                            title="Translate question"
+                            style={{ ...editIconStyle, color: "#0f766e" }}
+                            onClick={() =>
+                              openQuestionTranslationsModal({
+                                question_id: qs.question.question_id,
+                                question_section_id: qs.question_section_id,
+                                section_id: section.section_id,
+                                question_order: qs.question_order,
+                                is_required: qs?.is_required ?? qs?.question_section?.is_required ?? false,
+                                include_sum_total: getQuestionSectionBoolean(qs, "include_sum_total"),
+                                unique_calculation: getQuestionSectionBoolean(qs, "unique_calculation"),
+                                has_subquestion: getQuestionSectionBoolean(qs, "has_subquestion"),
+                                sub_question_type: getQuestionSectionForeignKeyId(qs, "sub_question_type"),
+                                sub_question_prompt:
+                                  qs?.sub_question_prompt ?? qs?.question_section?.sub_question_prompt ?? "",
+                                title: qs.question.title,
+                                force_conditional_source_question_id: null,
+                                force_conditional_target_section_id: null,
+                              })
                             }
                           />
 
@@ -2490,6 +3753,7 @@ const compareQuestionOrder = (left, right) => {
                                   title="View question"
                                   style={viewIconStyle}
                                   onClick={() => {
+                                    clearRunAssessmentPreviewOverrides();
                                     const flowQuestionSectionId = Number(
                                       flowQuestionForRow?.question_section_id ??
                                         flowQuestionForRow?.question_section?.question_section_id ??
@@ -2534,6 +3798,40 @@ const compareQuestionOrder = (left, right) => {
                                         getQuestionSectionForeignKeyId(flowQuestionForRow, "sub_question_type"),
                                         flowQuestionForRow?.sub_question_prompt ?? flowQuestionForRow?.question_section?.sub_question_prompt ?? ""
                                     )
+                                  }
+                                />
+
+                                <FontAwesomeIcon
+                                  icon={faLanguage}
+                                  title="Translate question"
+                                  style={{ ...editIconStyle, color: "#0f766e" }}
+                                  onClick={() =>
+                                    openQuestionTranslationsModal({
+                                      question_id: flowQuestionForRow?.question?.question_id,
+                                      question_section_id: flowQuestionForRow.question_section_id,
+                                      section_id: targetSectionId,
+                                      question_order: flowQuestionForRow.question_order,
+                                      is_required:
+                                        flowQuestionForRow?.is_required ??
+                                        flowQuestionForRow?.question_section?.is_required ??
+                                        false,
+                                      include_sum_total: getQuestionSectionBoolean(flowQuestionForRow, "include_sum_total"),
+                                      unique_calculation: getQuestionSectionBoolean(flowQuestionForRow, "unique_calculation"),
+                                      has_subquestion: getQuestionSectionBoolean(flowQuestionForRow, "has_subquestion"),
+                                      sub_question_type: getQuestionSectionForeignKeyId(flowQuestionForRow, "sub_question_type"),
+                                      sub_question_prompt:
+                                        flowQuestionForRow?.sub_question_prompt ??
+                                        flowQuestionForRow?.question_section?.sub_question_prompt ??
+                                        "",
+                                      title: flowQuestionForRow?.question?.title || "Question Title",
+                                      force_conditional_source_question_id: Number(
+                                        nearestConditionalSource?.sourceQuestionSection?.question?.question_id ??
+                                          nearestConditionalSource?.sourceQuestionSection?.question_id ??
+                                          nearestConditionalSource?.sourceQuestionSection?.question_section?.question_id ??
+                                          0
+                                      ) || null,
+                                      force_conditional_target_section_id: Number(targetSectionId) || null,
+                                    })
                                   }
                                 />
 
@@ -2879,6 +4177,7 @@ const compareQuestionOrder = (left, right) => {
                                 title="View question"
                                 style={viewIconStyle}
                                 onClick={() => {
+                                  clearRunAssessmentPreviewOverrides();
                                   const flowQuestionSectionId = Number(
                                     flowQ?.question_section_id ??
                                       flowQ?.question_section?.question_section_id ??
@@ -2925,6 +4224,39 @@ const compareQuestionOrder = (left, right) => {
                                     getQuestionSectionForeignKeyId(flowQ, "sub_question_type"),
                                     flowQ?.sub_question_prompt ?? flowQ?.question_section?.sub_question_prompt ?? ""
                                   )
+                                }
+                              />
+
+                              <FontAwesomeIcon
+                                icon={faLanguage}
+                                title="Translate question"
+                                style={{ ...editIconStyle, color: "#0f766e" }}
+                                onClick={() =>
+                                  openQuestionTranslationsModal({
+                                    question_id: flowQ?.question?.question_id,
+                                    question_section_id: flowQ.question_section_id,
+                                    section_id: lastConditionalSourceInfo?.targetSectionId,
+                                    question_order: flowQ.question_order,
+                                    is_required:
+                                      flowQ?.is_required ?? flowQ?.question_section?.is_required ?? false,
+                                    include_sum_total: getQuestionSectionBoolean(flowQ, "include_sum_total"),
+                                    unique_calculation: getQuestionSectionBoolean(flowQ, "unique_calculation"),
+                                    has_subquestion: getQuestionSectionBoolean(flowQ, "has_subquestion"),
+                                    sub_question_type: getQuestionSectionForeignKeyId(flowQ, "sub_question_type"),
+                                    sub_question_prompt:
+                                      flowQ?.sub_question_prompt ??
+                                      flowQ?.question_section?.sub_question_prompt ??
+                                      "",
+                                    title: flowQ?.question?.title || "Question Title",
+                                    force_conditional_source_question_id: Number(
+                                      lastConditionalSourceInfo?.sourceQuestionSection?.question?.question_id ??
+                                        lastConditionalSourceInfo?.sourceQuestionSection?.question_id ??
+                                        lastConditionalSourceInfo?.sourceQuestionSection?.question_section?.question_id ??
+                                        0
+                                    ) || null,
+                                    force_conditional_target_section_id:
+                                      Number(lastConditionalSourceInfo?.targetSectionId) || null,
+                                  })
                                 }
                               />
 
@@ -4748,7 +6080,7 @@ const compareQuestionOrder = (left, right) => {
 
         <RunAssessment
           isOpen={isRunAssessmentOpen}
-          onClose={() => setIsRunAssessmentOpen(false)}
+          onClose={handleCloseRunAssessment}
           assessmentName={assessmentDetails?.name}
           assessmentId={Number(assessmentDetails?.assessment_id ?? id ?? 0) || null}
           shouldPersistAssessmentResponses={false}
@@ -4759,12 +6091,805 @@ const compareQuestionOrder = (left, right) => {
               ? runPatientEventId
               : null
           }
-          sections={groupedSections}
+          sections={runSectionsOverride || groupedSections}
           startQuestionSectionId={runStartQuestionSectionId}
           startQuestionId={runStartQuestionId}
           forceConditionalSourceQuestionId={runForceConditionalSourceQuestionId}
           forceConditionalTargetSectionId={runForceConditionalTargetSectionId}
+          requestFn={runRequestFnOverride || apiRequest}
         />
+
+        {isTranslationsOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.56)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "20px",
+              zIndex: 1400,
+            }}
+          >
+            <div
+              style={{
+                width: "min(920px, 100%)",
+                maxHeight: "90vh",
+                background: "#ffffff",
+                borderRadius: "20px",
+                overflow: "hidden",
+                boxShadow: "0 30px 80px rgba(15, 23, 42, 0.32)",
+                border: "1px solid rgba(219, 234, 254, 0.8)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                    Language Translations{assessmentDetails?.name ? `: ${assessmentDetails.name}` : ""}
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                    Manage assessment detail translations by language.
+                  </div>
+                </div>
+                <button
+                  onClick={closeTranslationsModal}
+                  style={{
+                    background: "#fff",
+                    color: "#334155",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding: "20px",
+                  overflow: "auto",
+                  background: "#f8fafc",
+                  display: "grid",
+                  gap: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "16px",
+                    padding: "18px",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
+                    Language
+                  </div>
+                  <label
+                    style={{
+                      display: "grid",
+                      gap: "8px",
+                      color: "#334155",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>Select language</span>
+                    <select
+                      value={selectedLanguageCode}
+                      onChange={(e) => setSelectedLanguageCode(e.target.value)}
+                      disabled={languagesLoading}
+                      style={{
+                        minHeight: "42px",
+                        borderRadius: "10px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 12px",
+                        fontSize: "0.95rem",
+                        color: "#0f172a",
+                        background: languagesLoading ? "#e2e8f0" : "#fff",
+                      }}
+                    >
+                      <option value="en">English</option>
+                      {languages
+                        .filter((language) => language?.code && language.code !== "en")
+                        .map((language) => (
+                          <option key={language.code} value={language.code}>
+                            {language.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {languagesLoading && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Loading languages...
+                    </div>
+                  )}
+                  {selectedLanguageCode === "en" && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Select a non-English language to edit translated assessment details.
+                    </div>
+                  )}
+                </div>
+
+                {selectedLanguageCode !== "en" && (
+                  <div
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "18px",
+                      boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "12px",
+                        marginBottom: "14px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>Assessment Details</div>
+                      <button
+                        type="button"
+                        onClick={handleSaveAssessmentTranslation}
+                        disabled={savingTranslation || !translationFormData.assessment_translation_id}
+                        style={{
+                          padding: "8px 14px",
+                          background:
+                            savingTranslation || !translationFormData.assessment_translation_id
+                              ? "#cbd5e1"
+                              : "#0f766e",
+                          color:
+                            savingTranslation || !translationFormData.assessment_translation_id
+                              ? "#475569"
+                              : "#fff",
+                          border: "none",
+                          borderRadius: "10px",
+                          cursor:
+                            savingTranslation || !translationFormData.assessment_translation_id
+                              ? "not-allowed"
+                              : "pointer",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {savingTranslation ? "Saving..." : "Save Translation"}
+                      </button>
+                    </div>
+
+                    {loadingTranslation ? (
+                      <div style={{ color: "#64748b", fontSize: "0.95rem" }}>
+                        Loading assessment translation...
+                      </div>
+                    ) : (
+                      <>
+                        {translationError && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#fff7ed",
+                              border: "1px solid #fdba74",
+                              color: "#9a3412",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {translationError}
+                          </div>
+                        )}
+
+                        {translationSuccessMessage && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#ecfdf5",
+                              border: "1px solid #86efac",
+                              color: "#166534",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {translationSuccessMessage}
+                          </div>
+                        )}
+
+                        <div style={{ display: "grid", gap: "14px" }}>
+                          {Object.entries(translationFieldLabels).map(([field, label]) => {
+                            const isLongText = field !== "name";
+
+                            return (
+                              <label
+                                key={field}
+                                style={{
+                                  display: "grid",
+                                  gap: "8px",
+                                  color: "#334155",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <span>{label}</span>
+                                {isLongText ? (
+                                  <textarea
+                                    value={translationFormData[field] || ""}
+                                    onChange={(e) => handleTranslationFieldChange(field, e.target.value)}
+                                    rows={field === "description" ? 4 : 3}
+                                    style={{
+                                      width: "100%",
+                                      borderRadius: "10px",
+                                      border: "1px solid #cbd5e1",
+                                      padding: "10px 12px",
+                                      fontSize: "0.95rem",
+                                      color: "#0f172a",
+                                      resize: "vertical",
+                                      fontFamily: "inherit",
+                                    }}
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={translationFormData[field] || ""}
+                                    onChange={(e) => handleTranslationFieldChange(field, e.target.value)}
+                                    style={{
+                                      width: "100%",
+                                      minHeight: "42px",
+                                      borderRadius: "10px",
+                                      border: "1px solid #cbd5e1",
+                                      padding: "0 12px",
+                                      fontSize: "0.95rem",
+                                      color: "#0f172a",
+                                    }}
+                                  />
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isSectionTranslationsOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.56)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "20px",
+              zIndex: 1400,
+            }}
+          >
+            <div
+              style={{
+                width: "min(920px, 100%)",
+                maxHeight: "90vh",
+                background: "#ffffff",
+                borderRadius: "20px",
+                overflow: "hidden",
+                boxShadow: "0 30px 80px rgba(15, 23, 42, 0.32)",
+                border: "1px solid rgba(219, 234, 254, 0.8)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                    Section Language Translations{activeSectionTranslationTarget?.title ? `: ${activeSectionTranslationTarget.title}` : ""}
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                    Manage section translations{assessmentDetails?.name ? ` for ${assessmentDetails.name}` : ""}.
+                  </div>
+                </div>
+                <button
+                  onClick={closeSectionTranslationsModal}
+                  style={{
+                    background: "#fff",
+                    color: "#334155",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding: "20px",
+                  overflow: "auto",
+                  background: "#f8fafc",
+                  display: "grid",
+                  gap: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "16px",
+                    padding: "18px",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
+                    Language
+                  </div>
+                  <label
+                    style={{
+                      display: "grid",
+                      gap: "8px",
+                      color: "#334155",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>Select language</span>
+                    <select
+                      value={selectedSectionLanguageCode}
+                      onChange={(e) => setSelectedSectionLanguageCode(e.target.value)}
+                      disabled={languagesLoading}
+                      style={{
+                        minHeight: "42px",
+                        borderRadius: "10px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 12px",
+                        fontSize: "0.95rem",
+                        color: "#0f172a",
+                        background: languagesLoading ? "#e2e8f0" : "#fff",
+                      }}
+                    >
+                      <option value="en">English</option>
+                      {languages
+                        .filter((language) => language?.code && language.code !== "en")
+                        .map((language) => (
+                          <option key={language.code} value={language.code}>
+                            {language.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {languagesLoading && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Loading languages...
+                    </div>
+                  )}
+                  {selectedSectionLanguageCode === "en" && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Select a non-English language to edit translated section details.
+                    </div>
+                  )}
+                </div>
+
+                {selectedSectionLanguageCode !== "en" && (
+                  <div
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "18px",
+                      boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "12px",
+                        marginBottom: "14px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>Section Details</div>
+                      <button
+                        type="button"
+                        onClick={handleSaveSectionTranslation}
+                        disabled={savingSectionTranslation}
+                        style={{
+                          padding: "8px 14px",
+                          background:
+                            savingSectionTranslation
+                              ? "#cbd5e1"
+                              : "#0f766e",
+                          color:
+                            savingSectionTranslation
+                              ? "#475569"
+                              : "#fff",
+                          border: "none",
+                          borderRadius: "10px",
+                          cursor:
+                            savingSectionTranslation
+                              ? "not-allowed"
+                              : "pointer",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {savingSectionTranslation ? "Saving..." : "Save Translation"}
+                      </button>
+                    </div>
+
+                    {loadingSectionTranslation ? (
+                      <div style={{ color: "#64748b", fontSize: "0.95rem" }}>
+                        Loading section translation...
+                      </div>
+                    ) : (
+                      <>
+                        {sectionTranslationError && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#fff7ed",
+                              border: "1px solid #fdba74",
+                              color: "#9a3412",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {sectionTranslationError}
+                          </div>
+                        )}
+
+                        {sectionTranslationSuccessMessage && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#ecfdf5",
+                              border: "1px solid #86efac",
+                              color: "#166534",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {sectionTranslationSuccessMessage}
+                          </div>
+                        )}
+
+                        <div style={{ display: "grid", gap: "14px" }}>
+                          {Object.entries(sectionTranslationFieldLabels).map(([field, label]) => {
+                            const isLongText = field !== "title";
+
+                            return (
+                              <label
+                                key={field}
+                                style={{
+                                  display: "grid",
+                                  gap: "8px",
+                                  color: "#334155",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <span>{label}</span>
+                                {isLongText ? (
+                                  <textarea
+                                    value={sectionTranslationFormData[field] || ""}
+                                    onChange={(e) => handleSectionTranslationFieldChange(field, e.target.value)}
+                                    rows={field === "description" ? 4 : 3}
+                                    style={{
+                                      width: "100%",
+                                      borderRadius: "10px",
+                                      border: "1px solid #cbd5e1",
+                                      padding: "10px 12px",
+                                      fontSize: "0.95rem",
+                                      color: "#0f172a",
+                                      resize: "vertical",
+                                      fontFamily: "inherit",
+                                    }}
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={sectionTranslationFormData[field] || ""}
+                                    onChange={(e) => handleSectionTranslationFieldChange(field, e.target.value)}
+                                    style={{
+                                      width: "100%",
+                                      minHeight: "42px",
+                                      borderRadius: "10px",
+                                      border: "1px solid #cbd5e1",
+                                      padding: "0 12px",
+                                      fontSize: "0.95rem",
+                                      color: "#0f172a",
+                                    }}
+                                  />
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isQuestionTranslationsOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.56)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "20px",
+              zIndex: 1400,
+            }}
+          >
+            <div
+              style={{
+                width: "min(1100px, 100%)",
+                maxHeight: "92vh",
+                background: "#ffffff",
+                borderRadius: "20px",
+                overflow: "hidden",
+                boxShadow: "0 30px 80px rgba(15, 23, 42, 0.32)",
+                border: "1px solid rgba(219, 234, 254, 0.8)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                    Question Language Translations{activeQuestionTranslationTarget?.title ? `: ${activeQuestionTranslationTarget.title}` : ""}
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                    Manage question translations{assessmentDetails?.name ? ` for ${assessmentDetails.name}` : ""}.
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <button
+                    onClick={handleShowQuestionTranslationPreview}
+                    disabled={loadingQuestionTranslation}
+                    style={{
+                      background: loadingQuestionTranslation ? "#cbd5e1" : "#0f766e",
+                      color: loadingQuestionTranslation ? "#475569" : "#fff",
+                      border: "1px solid #0f766e",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: loadingQuestionTranslation ? "not-allowed" : "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Show Question
+                  </button>
+                  <button
+                    onClick={closeQuestionTranslationsModal}
+                    style={{
+                      background: "#fff",
+                      color: "#334155",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "20px",
+                  overflow: "auto",
+                  background: "#f8fafc",
+                  display: "grid",
+                  gap: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "16px",
+                    padding: "18px",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
+                    Language
+                  </div>
+                  <label
+                    style={{
+                      display: "grid",
+                      gap: "8px",
+                      color: "#334155",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>Select language</span>
+                    <select
+                      value={selectedQuestionLanguageCode}
+                      onChange={(e) => setSelectedQuestionLanguageCode(e.target.value)}
+                      disabled={languagesLoading}
+                      style={{
+                        minHeight: "42px",
+                        borderRadius: "10px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 12px",
+                        fontSize: "0.95rem",
+                        color: "#0f172a",
+                        background: languagesLoading ? "#e2e8f0" : "#fff",
+                      }}
+                    >
+                      <option value="en">English</option>
+                      {languages
+                        .filter((language) => language?.code && language.code !== "en")
+                        .map((language) => (
+                          <option key={language.code} value={language.code}>
+                            {language.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {languagesLoading && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Loading languages...
+                    </div>
+                  )}
+                  {selectedQuestionLanguageCode === "en" && (
+                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                      Select a non-English language to edit translated question details.
+                    </div>
+                  )}
+                </div>
+
+                {selectedQuestionLanguageCode !== "en" && (
+                  <div
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "18px",
+                      boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "12px",
+                        marginBottom: "14px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>Question Details</div>
+                      <button
+                        type="button"
+                        onClick={handleSaveQuestionTranslation}
+                        disabled={savingQuestionTranslation}
+                        style={{
+                          padding: "8px 14px",
+                          background:
+                            savingQuestionTranslation
+                              ? "#cbd5e1"
+                              : "#0f766e",
+                          color:
+                            savingQuestionTranslation
+                              ? "#475569"
+                              : "#fff",
+                          border: "none",
+                          borderRadius: "10px",
+                          cursor:
+                            savingQuestionTranslation
+                              ? "not-allowed"
+                              : "pointer",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {savingQuestionTranslation ? "Saving..." : "Save Translation"}
+                      </button>
+                    </div>
+
+                    {loadingQuestionTranslation ? (
+                      <div style={{ color: "#64748b", fontSize: "0.95rem" }}>
+                        Loading question translation...
+                      </div>
+                    ) : (
+                      <>
+                        {questionTranslationError && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#fff7ed",
+                              border: "1px solid #fdba74",
+                              color: "#9a3412",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {questionTranslationError}
+                          </div>
+                        )}
+
+                        {questionTranslationSuccessMessage && (
+                          <div
+                            style={{
+                              marginBottom: "14px",
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#ecfdf5",
+                              border: "1px solid #86efac",
+                              color: "#166534",
+                              fontSize: "0.92rem",
+                            }}
+                          >
+                            {questionTranslationSuccessMessage}
+                          </div>
+                        )}
+
+                        <QuestionTranslationFields
+                          isOpen={isQuestionTranslationsOpen}
+                          editingQuestion={questionTranslationFormData}
+                          setEditingQuestion={setQuestionTranslationFormData}
+                          questionTypes={questionTypes}
+                          selectedQuestionType={selectedQuestionTranslationType}
+                          editableFields={questionTranslationEditableFields}
+                          forceChoicesJson={isQuestionTranslationCreateMode}
+                          forceHyperlinkField={isQuestionTranslationCreateMode}
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {isExampleReportOpen && (
           <div

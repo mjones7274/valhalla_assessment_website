@@ -17,10 +17,18 @@
 }
 
 .assessments-title {
-  margin-bottom: 20px;
+  margin: 0;
   font-size: 24px;
   font-weight: 700;
   color: #000;
+}
+
+.assessments-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .assessments-toolbar {
@@ -30,6 +38,7 @@
 .assessments-actions {
   display: flex;
   justify-content: center;
+  gap: 10px;
   margin-bottom: 8px;
 }
 
@@ -68,6 +77,22 @@
 
 .assessments-action-btn:hover {
   background: #1e40af !important;
+}
+
+.assessments-action-btn-secondary {
+  background: #0f172a !important;
+  border-color: #0f172a;
+}
+
+.assessments-action-btn-secondary:hover {
+  background: #1e293b !important;
+}
+
+@media (max-width: 720px) {
+  .assessments-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .assessments-search {

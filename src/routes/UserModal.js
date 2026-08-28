@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { FaEdit, FaTrash } from "react-icons/fa";
 import Detail from "./Detail"; // or inline if you want
 import { apiRequest } from "../api";
+import { useOutletContext } from "react-router-dom";
 import "./Users.css";
 
 const API_URL = `${process.env.REACT_APP_API_URL_BASE}/api/users/`;
@@ -118,6 +119,12 @@ const getCompanyUserCompanyId = (companyUser) => Number(
   companyUser?.company?.company_id ??
   0
 );
+const getUserTypeId = (user) => Number(
+  user?.user_type_id ??
+  user?.user_type?.user_type_id ??
+  user?.user_type?.id ??
+  0
+);
 const getPhoneRowKey = (phone) =>
   phone?.user_phone_id ??
   phone?.id ??
@@ -218,6 +225,7 @@ const generateDictionaryStylePassword = (
 };
 
 const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
+  const { user: currentUser } = useOutletContext() || {};
   const isEdit = mode === "edit" || mode === "add";
 
   const [firstName, setFirstName] = useState(user?.first_name || "");
@@ -271,6 +279,17 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
     country: "United States",
     address_type_id: "",
   });
+
+  const currentUserTypeId = getUserTypeId(currentUser);
+  const availableUserTypes = useMemo(() => {
+    if (mode !== "add" || currentUserTypeId <= 0) {
+      return userTypes;
+    }
+
+    return userTypes.filter(
+      (type) => Number(type?.user_type_id ?? 0) <= currentUserTypeId
+    );
+  }, [currentUserTypeId, mode, userTypes]);
 
   const loadRelatedPhonesAndAddresses = async (targetUserId) => {
     const normalizedUserId = Number(targetUserId);
@@ -840,6 +859,10 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
           throw new Error("User Type is required.");
         }
 
+        if (mode === "add" && currentUserTypeId > 0 && normalizedUserTypeId > currentUserTypeId) {
+          throw new Error("You cannot create a user with a higher user type than your own.");
+        }
+
         // 1️⃣ Save user
         const url = mode === "add" ? API_URL : `${API_URL}${user.user_id}/`;
         const method = mode === "add" ? "POST" : "PATCH";
@@ -1100,7 +1123,7 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                     ) : mode === "add" ? (
                       <select value={userTypeId} onChange={e => setUserTypeId(e.target.value)}>
                         <option value="">Select type</option>
-                        {userTypes.map(t => (
+                        {availableUserTypes.map(t => (
                           <option key={t.user_type_id} value={t.user_type_id}>
                             {formatUserTypeLabel(t.description)}
                           </option>
