@@ -875,12 +875,12 @@ const getScoreValueFromAnswer = (answerValue) => {
   return 0;
 };
 
-const getSelectedOptionOrder = (responseValue) => {
+const getSelectedOptionOrder = (responseValue, availableOptions = []) => {
   if (responseValue === null || responseValue === undefined) return NaN;
 
   if (typeof responseValue === "object" && !Array.isArray(responseValue)) {
     const order = Number(responseValue?.order);
-    return Number.isFinite(order) ? order : NaN;
+    if (Number.isFinite(order)) return order;
   }
 
   if (typeof responseValue === "number") {
@@ -891,10 +891,14 @@ const getSelectedOptionOrder = (responseValue) => {
     const trimmed = responseValue.trim();
     if (!trimmed) return NaN;
     const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : NaN;
+    if (Number.isFinite(parsed)) return parsed;
   }
 
-  return NaN;
+  const matchingOption = availableOptions.find((optionItem) =>
+    matchesSelectableOption(responseValue, optionItem)
+  );
+  const matchingOrder = Number(matchingOption?.order);
+  return Number.isFinite(matchingOrder) ? matchingOrder : NaN;
 };
 
 const getFlatQuestions = (sections) => {
@@ -1176,10 +1180,44 @@ const buildSelectableItemIdentity = (item) => {
   return primitiveText ? `option:${primitiveText}` : "";
 };
 
+const normalizeSelectableComparisonValues = (values) =>
+  values
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+
 const matchesSelectableOption = (item, optionItem) => {
   const itemIdentity = buildSelectableItemIdentity(item);
   const optionIdentity = buildSelectableItemIdentity(optionItem);
-  return Boolean(itemIdentity) && Boolean(optionIdentity) && itemIdentity === optionIdentity;
+  if (Boolean(itemIdentity) && Boolean(optionIdentity) && itemIdentity === optionIdentity) {
+    return true;
+  }
+
+  const itemIsObject = item && typeof item === "object" && !Array.isArray(item);
+  const optionIsObject = optionItem && typeof optionItem === "object" && !Array.isArray(optionItem);
+  const optionValues = normalizeSelectableComparisonValues([
+    optionItem?.option,
+    optionItem?.label,
+    optionItem?.default_option,
+    optionItem?.value,
+  ]);
+
+  if (!itemIsObject || !optionIsObject) {
+    const itemValues = new Set(normalizeSelectableComparisonValues([item]));
+    return optionValues.some((value) => itemValues.has(value));
+  }
+
+  const itemLabels = normalizeSelectableComparisonValues([
+    item?.option,
+    item?.label,
+    item?.default_option,
+  ]);
+  if (itemLabels.length > 0) {
+    const itemLabelSet = new Set(itemLabels);
+    return optionValues.some((value) => itemLabelSet.has(value));
+  }
+
+  const itemValue = String(item?.value ?? "").trim().toLowerCase();
+  return Boolean(itemValue) && Number.isNaN(Number(itemValue)) && optionValues.includes(itemValue);
 };
 
 const isExclusiveNoneMultiSelectOption = (item) => {
@@ -5203,7 +5241,7 @@ export default function RunAssessment({
       case "single_select":
       case "general_occurence_single_answer":
         if (selectOptions.length > 0) {
-          const selectedOrder = getSelectedOptionOrder(currentResponse);
+          const selectedOrder = getSelectedOptionOrder(currentResponse, selectOptions);
 
           return (
             <div className={`run-assessment-radio-group ${optionColumnClass}`}>
@@ -5239,7 +5277,7 @@ export default function RunAssessment({
         );
       default:
         if (selectOptions.length > 0) {
-          const selectedOrder = getSelectedOptionOrder(currentResponse);
+          const selectedOrder = getSelectedOptionOrder(currentResponse, selectOptions);
 
           return (
             <div className={`run-assessment-radio-group ${optionColumnClass}`}>
