@@ -585,6 +585,14 @@
   background: #1d4ed8;
 }
 
+.user-password-reset-success {
+  display: block;
+  margin-top: 6px;
+  color: #15803d;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .checkbox-row {
   display: inline-flex;
   align-items: center;

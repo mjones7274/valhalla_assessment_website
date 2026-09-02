@@ -266,6 +266,11 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
   const [showUserTypeModal, setShowUserTypeModal] = useState(false);
   const [draftUserTypeId, setDraftUserTypeId] = useState("");
   const [userTypeModalError, setUserTypeModalError] = useState("");
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordError, setResetPasswordError] = useState("");
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState("");
+  const [resettingPassword, setResettingPassword] = useState(false);
   const [newPhoneData, setNewPhoneData] = useState({
     phone: "",
     phone_type_id: "",
@@ -849,6 +854,62 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
     closeUserTypeModal();
   };
 
+  const openResetPasswordModal = () => {
+    setResetPassword(generateDictionaryStylePassword());
+    setResetPasswordError("");
+    setResetPasswordSuccess("");
+    setShowResetPasswordModal(true);
+  };
+
+  const closeResetPasswordModal = () => {
+    if (resettingPassword) return;
+    setShowResetPasswordModal(false);
+    setResetPassword("");
+    setResetPasswordError("");
+  };
+
+  const handleResetPassword = async () => {
+    const userId = Number(user?.user_id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      setResetPasswordError("Unable to identify the selected user.");
+      return;
+    }
+
+    if (
+      resetPassword.length < MIN_INITIAL_PASSWORD_LENGTH ||
+      resetPassword.length > MAX_INITIAL_PASSWORD_LENGTH
+    ) {
+      setResetPasswordError(
+        `Password must be ${MIN_INITIAL_PASSWORD_LENGTH}-${MAX_INITIAL_PASSWORD_LENGTH} characters.`
+      );
+      return;
+    }
+
+    setResettingPassword(true);
+    setResetPasswordError("");
+
+    try {
+      const response = await apiRequest(`${API_URL}${userId}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: resetPassword }),
+      });
+
+      if (!response.ok) {
+        const errorMessage = await getResponseErrorMessage(response);
+        throw new Error(`Password reset failed: ${errorMessage}`);
+      }
+
+      setShowResetPasswordModal(false);
+      setResetPassword("");
+      setResetPasswordSuccess("Password reset successfully.");
+    } catch (err) {
+      setResetPasswordError(err?.message || "Password reset failed.");
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaveError("");
@@ -1175,12 +1236,15 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                     <button
                       type="button"
                       className="user-reset-password-btn"
-                      onClick={() => {
-                        console.log("Password Reset Link Sent");
-                      }}
+                      onClick={openResetPasswordModal}
                     >
                       Reset Password
                     </button>
+                    {resetPasswordSuccess && (
+                      <span className="user-password-reset-success" role="status">
+                        {resetPasswordSuccess}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1566,6 +1630,71 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
               )}
               <button onClick={closeUserTypeModal}>Cancel</button>
               <button className="primary" onClick={handleSaveUserTypeFromModal}>Save User Type</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetPasswordModal && (
+        <div className="modal-overlay" style={{ zIndex: 1350 }}>
+          <div className="modal modern" style={{ width: "520px" }} role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+            <div className="modal-header">
+              <h3 id="reset-password-title">Reset Password</h3>
+              <button
+                type="button"
+                className="icon-close"
+                onClick={closeResetPasswordModal}
+                disabled={resettingPassword}
+                aria-label="Close password reset dialog"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="details-grid">
+              <Detail label="New Password">
+                <input
+                  type="text"
+                  value={resetPassword}
+                  onChange={(event) => {
+                    setResetPassword(event.target.value);
+                    setResetPasswordError("");
+                  }}
+                  autoComplete="new-password"
+                  disabled={resettingPassword}
+                  autoFocus
+                />
+              </Detail>
+              <span />
+              <button
+                type="button"
+                onClick={() => {
+                  setResetPassword(generateDictionaryStylePassword());
+                  setResetPasswordError("");
+                }}
+                disabled={resettingPassword}
+              >
+                Generate Another Password
+              </button>
+            </div>
+
+            <div className="modal-actions">
+              {resetPasswordError && (
+                <p style={{ color: "#dc2626", marginRight: "auto" }} role="alert">
+                  {resetPasswordError}
+                </p>
+              )}
+              <button type="button" onClick={closeResetPasswordModal} disabled={resettingPassword}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleResetPassword}
+                disabled={resettingPassword}
+              >
+                {resettingPassword ? "Resetting..." : "Reset Password"}
+              </button>
             </div>
           </div>
         </div>
