@@ -11,7 +11,7 @@ import { replacePatientText, shouldUseClientTerminology } from "../uiTerminology
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
 
-function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel }) {
+function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompany }) {
   const [sidebar, setSidebar] = useState(false);
   const navigate = useNavigate();
 
@@ -74,6 +74,10 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel }) {
           <FaIcons.FaBars onClick={showSidebar} />
         </Link>
 
+        {loggedIn && Boolean(selectedCompany?.api_test_mode) && (
+          <span className="api-test-mode-pill api-test-mode-pill-mobile">API Test Mode</span>
+        )}
+
         <div className="top-nav-links" aria-label="Primary Navigation">
           <div className="top-nav-links-left">
             {topNavItems.map((item, index) => {
@@ -110,6 +114,9 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel }) {
 
           {loggedIn && user && (
             <div className="top-nav-links-right">
+              {Boolean(selectedCompany?.api_test_mode) && (
+                <span className="api-test-mode-pill">API Test Mode</span>
+              )}
               <div className="header-account-pill" title={`${user.first_name} ${user.last_name}`}>
                 <span className="header-account-name">{user.first_name} {user.last_name}</span>
                 {headerAccountLabel && <span className="header-account-role">{headerAccountLabel}</span>}

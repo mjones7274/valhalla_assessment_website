@@ -876,8 +876,11 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
     }
 
     if (
-      resetPassword.length < MIN_INITIAL_PASSWORD_LENGTH ||
-      resetPassword.length > MAX_INITIAL_PASSWORD_LENGTH
+      currentUserTypeId !== 3 &&
+      (
+        resetPassword.length < MIN_INITIAL_PASSWORD_LENGTH ||
+        resetPassword.length > MAX_INITIAL_PASSWORD_LENGTH
+      )
     ) {
       setResetPasswordError(
         `Password must be ${MIN_INITIAL_PASSWORD_LENGTH}-${MAX_INITIAL_PASSWORD_LENGTH} characters.`

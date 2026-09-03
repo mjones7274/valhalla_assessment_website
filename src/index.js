@@ -103,6 +103,7 @@ const AppHeader = ({ loggedIn, setLoggedIn, user }) => {
           setLoggedIn={setLoggedIn}
           user={user}
           headerAccountLabel={headerAccountLabel}
+          selectedCompany={selectedCompany}
         />
       </div>
 

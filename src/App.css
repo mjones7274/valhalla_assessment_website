@@ -112,7 +112,27 @@
 .top-nav-links-right {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   margin-left: auto;
+}
+
+.api-test-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #a85b00;
+  background: #fff3c4;
+  color: #713b00;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.api-test-mode-pill-mobile {
+  display: none;
 }
 
 .top-nav-link {
@@ -349,6 +369,10 @@
 
   .menu-bars {
     margin-left: 0;
+  }
+
+  .api-test-mode-pill-mobile {
+    display: inline-flex;
   }
 
   .header-account-pill {
