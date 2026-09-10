@@ -1377,6 +1377,7 @@ const Patients = () => {
       {assessmentPatient && (
         <PatientAssessmentsModal
           patient={assessmentPatient}
+          userTypeId={userTypeId}
           onClose={() => setAssessmentPatient(null)}
         />
       )}
@@ -5046,7 +5047,7 @@ const PatientPersonModal = ({ companyId, patientId, linkedPersonIds, onClose, on
   );
 };
 
-const PatientAssessmentsModal = ({ patient, onClose }) => {
+const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
   const [attempts, setAttempts] = useState([]);
   const [tokenExpirationByAttemptId, setTokenExpirationByAttemptId] = useState({});
   const [attemptProgressByAttemptId, setAttemptProgressByAttemptId] = useState({});
@@ -6799,7 +6800,10 @@ const PatientAssessmentsModal = ({ patient, onClose }) => {
                       key={`${attemptId ?? "tmp"}-${getAttemptAssessmentId(attempt)}`}
                     >
                       <div className="assessment-card-header">
-                        <div className="assessment-card-title">{getAssessmentName(attempt)}</div>
+                        <div className="assessment-card-title">
+                          {getAssessmentName(attempt)}
+                          {userTypeId === 3 && attemptId != null ? ` (${attemptId})` : ""}
+                        </div>
                         {!isDisabledForActions && (
                           <button
                             type="button"

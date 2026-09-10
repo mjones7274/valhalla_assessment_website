@@ -5583,7 +5583,9 @@ const compareQuestionOrder = (left, right) => {
               }}
             >
               <h3 style={{ marginBottom: "16px" }}>
-                {editingSectionId ? "Edit Section" : "Create New Section"}
+                {editingSectionId
+                  ? `Edit Section (Section ID: ${editingSectionId})`
+                  : "Create New Section"}
               </h3>
 
               <div style={{ marginBottom: "12px" }}>

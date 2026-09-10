@@ -1275,6 +1275,9 @@ const normalizeZipcodeInput = (rawValue) =>
 
 const isValidZipcodeResponse = (value) => /^\d{5}$/.test(normalizeZipcodeInput(value));
 
+const isValidEmailResponse = (value) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? "").trim());
+
 const normalizeVideoUrl = (rawUrl) => {
   const value = String(rawUrl ?? "").trim();
   if (!value) return "";
@@ -2366,6 +2369,17 @@ export default function RunAssessment({
   const getSectionIdForItem = (item) =>
     Number(item?.assessmentSectionId ?? item?.sectionId ?? 0) || 0;
 
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
+  const questionsInitializationKey = questions
+    .map((item, index) => [
+      Number(item?.questionSectionId ?? 0) || 0,
+      getQuestionIdForItem(item),
+      getSectionIdForItem(item),
+      Number(item?.questionOrder ?? index + 1),
+    ].join(":"))
+    .join("|");
+
   const setResponsesWithRef = (valueOrUpdater) => {
     const nextResponses =
       typeof valueOrUpdater === "function"
@@ -2642,11 +2656,12 @@ export default function RunAssessment({
     }
 
     let cancelled = false;
+    const initializationQuestions = questionsRef.current;
 
     const resolveStartIndex = (attemptData) => {
       const requestedStartId = Number(startQuestionSectionId);
       if (Number.isFinite(requestedStartId) && requestedStartId > 0) {
-        const requestedIndex = questions.findIndex(
+        const requestedIndex = initializationQuestions.findIndex(
           (item) => Number(item.questionSectionId) === requestedStartId
         );
 
@@ -2657,7 +2672,7 @@ export default function RunAssessment({
 
       const attemptQuestionId = getAttemptQuestionIdValue(attemptData);
       if (attemptQuestionId > 0) {
-        const questionIndex = questions.findIndex(
+        const questionIndex = initializationQuestions.findIndex(
           (item) => getQuestionIdForItem(item) === attemptQuestionId
         );
         if (questionIndex >= 0) return questionIndex;
@@ -2665,7 +2680,7 @@ export default function RunAssessment({
 
       const attemptSectionId = getAttemptSectionIdValue(attemptData);
       if (attemptSectionId > 0) {
-        const sectionIndex = questions.findIndex(
+        const sectionIndex = initializationQuestions.findIndex(
           (item) => getSectionIdForItem(item) === attemptSectionId
         );
         if (sectionIndex >= 0) return sectionIndex;
@@ -2790,7 +2805,7 @@ export default function RunAssessment({
         };
       };
 
-      if (!questions.length) {
+      if (!initializationQuestions.length) {
         setIsAttemptReady(true);
         logInitPerf("no-questions");
         return;
@@ -2869,7 +2884,7 @@ export default function RunAssessment({
         }
 
         if (!activeAttempt && !(Number.isFinite(numericAttemptIdOverride) && numericAttemptIdOverride > 0)) {
-          const defaultItem = questions[0] ?? null;
+          const defaultItem = initializationQuestions[0] ?? null;
           const createAttemptRes = await requestFn(PATIENT_ASSESSMENT_ATTEMPTS_API, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2895,7 +2910,7 @@ export default function RunAssessment({
         }
 
         const startIndex = Math.max(0, resolveStartIndex(activeAttempt));
-        const startItem = questions[startIndex] ?? questions[0] ?? null;
+        const startItem = initializationQuestions[startIndex] ?? initializationQuestions[0] ?? null;
 
         if (String(activeAttempt?.status ?? "").toLowerCase() !== "in_progress") {
           await requestFn(`${PATIENT_ASSESSMENT_ATTEMPTS_API}${resolvedAttemptId}/`, {
@@ -2978,7 +2993,7 @@ export default function RunAssessment({
     };
   }, [
     isOpen,
-    questions,
+    questionsInitializationKey,
     startQuestionSectionId,
     canPersistAttempts,
     numericPatientId,
@@ -3227,6 +3242,7 @@ export default function RunAssessment({
   const isInjuryEventDateQuestion =
     isInjuryEventDatePrompt(question?.question) || isInjuryEventDatePrompt(question?.title);
   const isZipcodeQuestion = questionType === "zipcode" || questionType === "zip_code";
+  const isEmailResponseQuestion = questionType === "email_response";
   const isSignatureAgreementQuestion = questionType === "signature_agreement";
   const isNoResponseQuestion =
     questionType === "no_response" || questionType === "perform_task_video";
@@ -4255,6 +4271,8 @@ export default function RunAssessment({
     (currentVideoSource.kind === "native" || (Boolean(currentYouTubeVideoId) && !isYouTubeFallbackActive));
   const isCurrentVideoCompleted = Boolean(videoCompletionByQuestionId[questionId]);
   const isInvalidZipcodeResponse = isZipcodeQuestion && !isValidZipcodeResponse(currentResponse);
+  const isInvalidEmailResponse =
+    isEmailResponseQuestion && hasCurrentResponse && !isValidEmailResponse(currentResponse);
   const isMissingRequiredResponse = isCurrentQuestionRequired && (
     isSignatureAgreementQuestion
       ? isIncompleteSignatureAgreement
@@ -4624,6 +4642,7 @@ export default function RunAssessment({
       isMissingRequiredResponse ||
       isMissingRequiredVideoCompletion ||
       isInvalidZipcodeResponse ||
+      isInvalidEmailResponse ||
       isIncompleteSignatureAgreement
     ) return;
 
@@ -4696,6 +4715,7 @@ export default function RunAssessment({
       isMissingRequiredResponse ||
       isMissingRequiredVideoCompletion ||
       isInvalidZipcodeResponse ||
+      isInvalidEmailResponse ||
       isIncompleteSignatureAgreement
     ) return;
 
@@ -4933,6 +4953,8 @@ export default function RunAssessment({
             value={String(currentResponse ?? "")}
             onChange={(event) => setResponse(event.target.value)}
             className="run-assessment-input"
+            aria-invalid={isInvalidEmailResponse}
+            aria-describedby={isInvalidEmailResponse ? "run-assessment-email-error" : undefined}
           />
         );
       case "date_response":
@@ -5513,6 +5535,16 @@ export default function RunAssessment({
               </div>
             ) : null}
 
+            {isInvalidEmailResponse ? (
+              <div
+                id="run-assessment-email-error"
+                className="run-assessment-inline-error"
+                role="alert"
+              >
+                {isSpanish ? "Ingrese una dirección de correo electrónico válida." : "Enter a valid email address."}
+              </div>
+            ) : null}
+
             {activeOptionMoreInfoCard?.questionId === questionId ? (
               <div
                 className={`run-assessment-option-more-info-overlay ${
@@ -5587,6 +5619,7 @@ export default function RunAssessment({
                   isMissingRequiredResponse ||
                   isMissingRequiredVideoCompletion ||
                   isInvalidZipcodeResponse ||
+                  isInvalidEmailResponse ||
                   isIncompleteSignatureAgreement
                 }
               >

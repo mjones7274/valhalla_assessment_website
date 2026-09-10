@@ -289,7 +289,7 @@ export default function QuestionModal({
             ? hideConditionalResponseControls
               ? "Add Question - Conditional Flow"
               : "Add Question"
-            : "Edit Question"}
+            : `Edit Question (Question ID: ${editingQuestion.question_id}, Question Section ID: ${editingQuestion.question_section_id})`}
         </div>
 
         {/* Body */}
