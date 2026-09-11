@@ -5087,6 +5087,12 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
+  const primaryCompanyId = Number(
+    patient?.companies?.[0]?.company?.company_id ??
+    patient?.companies?.[0]?.company_id ??
+    patient?.companies?.[0]?.company?.id ??
+    0
+  );
   const primaryCompanyName =
     String(
       patient?.companies?.[0]?.company?.company_name ??
@@ -6158,6 +6164,21 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     showLinkFeedback,
   ]);
 
+  const handleCopyAssessmentUrl = useCallback(async (attempt) => {
+    const status = String(getAttemptStatus(attempt) ?? "").trim().toLowerCase();
+    if (status === "removed" || status === "completed") return;
+
+    try {
+      const tokenValue = await getOrCreateAttemptToken(attempt);
+      const assessmentLink = buildAssessmentLink(tokenValue);
+      await navigator.clipboard.writeText(assessmentLink);
+      showLinkFeedback(attempt, "URL copied to clipboard");
+    } catch (error) {
+      console.error("Copy assessment URL failed", error);
+      showLinkFeedback(attempt, "Unable to copy URL");
+    }
+  }, [buildAssessmentLink, getOrCreateAttemptToken, showLinkFeedback]);
+
   const handleGenerateNewLink = useCallback(async (attempt) => {
     const status = String(getAttemptStatus(attempt) ?? "").trim().toLowerCase();
     if (status === "removed" || status === "completed") return;
@@ -6589,7 +6610,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       assessmentName: getAssessmentName(attempt),
       fullName: patientName || patient?.email || "",
       companyName: primaryCompanyName,
-      invoiceNumber: attemptId,
+      invoiceNumber: `${primaryCompanyId}-${attemptId}`,
       assessmentDate:
         attempt?.completed_at ??
         attempt?.completedAt ??
@@ -6609,7 +6630,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     } finally {
       setLoadingGeneratedPreview(null);
     }
-  }, [getAssessmentName, patient?.email, patientName, primaryCompanyName]);
+  }, [getAssessmentName, patient?.email, patientName, primaryCompanyId, primaryCompanyName]);
 
   const selectedEventNumericId = Number(selectedPatientEventId);
   const selectedEvent = patientEvents.find(
@@ -6804,6 +6825,15 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                           {getAssessmentName(attempt)}
                           {userTypeId === 3 && attemptId != null ? ` (${attemptId})` : ""}
                         </div>
+                        {linkFeedbackMessage && (
+                          <div
+                            className="assessment-card-link-feedback"
+                            role="status"
+                            aria-live="polite"
+                          >
+                            {linkFeedbackMessage}
+                          </div>
+                        )}
                         {!isDisabledForActions && (
                           <button
                             type="button"
@@ -6923,14 +6953,26 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                                   : "Generate Report"}
                               </button>
                             )}
-                            <button
-                              type="button"
-                              className="assessments-action-btn"
-                              disabled={!isCompleted || loadingAnswersAttemptId === attemptId}
-                              onClick={() => handleViewAnswers(attempt)}
-                            >
-                              {loadingAnswersAttemptId === attemptId ? "Loading..." : "View Answers"}
-                            </button>
+                            {userTypeId === 3 && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                disabled={!isCompleted || loadingAnswersAttemptId === attemptId}
+                                onClick={() => handleViewAnswers(attempt)}
+                              >
+                                {loadingAnswersAttemptId === attemptId ? "Loading..." : "View Answers"}
+                              </button>
+                            )}
+                            {!isCompleted && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                disabled={isDisabledForActions}
+                                onClick={() => handleCopyAssessmentUrl(attempt)}
+                              >
+                                Copy URL
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="assessments-action-btn"
@@ -6965,18 +7007,6 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                             </button>
                           </div>
 
-                          {linkFeedbackMessage && (
-                            <div
-                              role="status"
-                              aria-live="polite"
-                              style={{
-                                fontSize: "0.85rem",
-                                color: "#166534",
-                              }}
-                            >
-                              {linkFeedbackMessage}
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>

@@ -4,13 +4,13 @@ const formatInvoiceDate = (value) => {
   const rawValue = String(value ?? "").trim();
   if (!rawValue) {
     const today = new Date();
-    return `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+    return `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
   }
 
   const parsedDate = new Date(rawValue);
   if (Number.isNaN(parsedDate.getTime())) return rawValue;
 
-  return `${parsedDate.getDate()}/${parsedDate.getMonth() + 1}/${parsedDate.getFullYear()}`;
+  return `${parsedDate.getMonth() + 1}/${parsedDate.getDate()}/${parsedDate.getFullYear()}`;
 };
 
 const invoiceShellStyle = {

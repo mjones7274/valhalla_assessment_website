@@ -1009,6 +1009,13 @@
   margin-bottom: 6px;
 }
 
+.assessment-card-link-feedback {
+  margin-left: auto;
+  color: #166534;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
 .assessment-card-refresh-btn {
   border: none;
   background: transparent;
