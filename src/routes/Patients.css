@@ -73,6 +73,17 @@
   border-right: none;
 }
 
+.patients-table th:nth-child(2),
+.patients-table td:nth-child(2) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.patients-table th:nth-child(4),
+.patients-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
 .patients-table th:nth-child(1),
 .patients-table th:nth-child(2),
 .patients-table th:nth-child(3),
@@ -90,6 +101,15 @@
 .patients-table td:nth-child(7),
 .patients-table td:nth-child(8) {
   text-align: center;
+}
+
+.patients-table td:nth-child(6) {
+  white-space: nowrap;
+}
+
+.patients-table th:nth-child(11),
+.patients-table td:nth-child(11) {
+  white-space: nowrap;
 }
 
 .patients-table tbody tr:last-child td {
@@ -195,6 +215,31 @@
 .assessments-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.latest-assessment-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.latest-assessment-status-pill.assigned {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.latest-assessment-status-pill.in-progress {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.latest-assessment-status-pill.completed {
+  background: #dcfce7;
+  color: #166534;
 }
 
 .patients-page .assessments-action-btn {
@@ -571,7 +616,31 @@
 }
 
 .patients-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
   margin-bottom: 8px;
+}
+
+.patients-company-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.patients-company-filter select {
+  min-width: 220px;
+  padding: 6px 30px 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.9rem;
 }
 
 .patients-actions {

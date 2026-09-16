@@ -96,6 +96,23 @@ const US_STATES = [
 
 const COUNTRY_OPTIONS = ["United States", "Canada", "Mexico"];
 
+const LATEST_ASSESSMENT_STATUSES = {
+  assigned: { label: "Assigned", className: "assigned" },
+  in_progress: { label: "In Progress", className: "in-progress" },
+  completed: { label: "Completed", className: "completed" },
+};
+
+const formatLatestAssessmentCodename = (value) => {
+  const normalizedValue = String(value ?? "").trim();
+  if (!normalizedValue) return "—";
+
+  return normalizedValue
+    .split("_")
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+};
+
 const getPersonFromRelation = (item) => item.person ?? item.people ?? item.person_data ?? item;
 
 const getPersonTypeDescription = (person) => (
@@ -1014,6 +1031,8 @@ const Patients = () => {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [companyFilterOptions, setCompanyFilterOptions] = useState([]);
+  const [companyFilterId, setCompanyFilterId] = useState("");
   const [sortField, setSortField] = useState("patient_id");
   const [sortDirection, setSortDirection] = useState("asc");
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -1027,6 +1046,7 @@ const Patients = () => {
   const selectedCompanyId = Number(
     selectedCompany?.company_id ?? selectedCompany?.id ?? selectedCompany?.company?.company_id ?? 0
   );
+  const isCorporateAdmin = userTypeId === 3;
   const isCompanyRestrictedUser = userTypeId === 1 || userTypeId === 2;
 
   useEffect(() => {
@@ -1057,6 +1077,41 @@ const Patients = () => {
 
     loadPatients();
   }, []);
+
+  useEffect(() => {
+    if (!isCorporateAdmin) {
+      setCompanyFilterOptions([]);
+      setCompanyFilterId("");
+      return;
+    }
+
+    const loadCompanyFilterOptions = async () => {
+      try {
+        const response = await apiRequest(COMPANIES_API);
+        if (!response.ok) {
+          throw new Error(`Companies request failed (${response.status})`);
+        }
+
+        const companyRows = await response.json();
+        setCompanyFilterOptions(
+          (Array.isArray(companyRows) ? companyRows : [])
+            .filter((company) => Number(company?.company_id ?? company?.id ?? 0) > 0)
+            .sort((left, right) =>
+              String(left?.company_name ?? left?.name ?? "").localeCompare(
+                String(right?.company_name ?? right?.name ?? ""),
+                undefined,
+                { sensitivity: "base" }
+              )
+            )
+        );
+      } catch (error) {
+        console.error("Failed to load company filter options", error);
+        setCompanyFilterOptions([]);
+      }
+    };
+
+    loadCompanyFilterOptions();
+  }, [isCorporateAdmin]);
 
   /* ----------------------------------
      Helpers
@@ -1092,10 +1147,19 @@ const Patients = () => {
   const sortedPatients = useMemo(() => {
     return [...patients]
       .filter((patient) => {
-        if (!isCompanyRestrictedUser) return true;
-        if (!selectedCompanyId) return false;
+        const patientCompanyIds = getPatientCompanyIds(patient);
 
-        return getPatientCompanyIds(patient).includes(selectedCompanyId);
+        if (isCompanyRestrictedUser) {
+          if (!selectedCompanyId) return false;
+          return patientCompanyIds.includes(selectedCompanyId);
+        }
+
+        const selectedFilterId = Number(companyFilterId);
+        if (isCorporateAdmin && selectedFilterId > 0) {
+          return patientCompanyIds.includes(selectedFilterId);
+        }
+
+        return true;
       })
       .filter(matchesSearch)
       .sort((a, b) => {
@@ -1117,6 +1181,13 @@ const Patients = () => {
           return compareValues(
             new Date(a.created_on).getTime() || 0,
             new Date(b.created_on).getTime() || 0
+          );
+        }
+
+        if (sortField === "latest_assessment_status") {
+          return compareValues(
+            normalizeText(a.latest_assessment_status),
+            normalizeText(b.latest_assessment_status)
           );
         }
 
@@ -1168,6 +1239,8 @@ const Patients = () => {
     sortDirection,
     matchesSearch,
     getCompanyNames,
+    companyFilterId,
+    isCorporateAdmin,
     isCompanyRestrictedUser,
     selectedCompanyId,
   ]);
@@ -1209,6 +1282,25 @@ const Patients = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
             />
+            {isCorporateAdmin && (
+              <label className="patients-company-filter">
+                <span>Company</span>
+                <select
+                  value={companyFilterId}
+                  onChange={(event) => setCompanyFilterId(event.target.value)}
+                >
+                  <option value="">All</option>
+                  {companyFilterOptions.map((company) => {
+                    const companyId = company?.company_id ?? company?.id;
+                    return (
+                      <option key={companyId} value={companyId}>
+                        {company?.company_name ?? company?.name ?? `Company ${companyId}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            )}
         </div>
         <div className="patients-actions">
             <button
@@ -1264,6 +1356,13 @@ const Patients = () => {
               </span>
             </th>
             <th>Assessments</th>
+            <th>Latest Assessment</th>
+            <th onClick={() => toggleSort("latest_assessment_status")}>
+              <span className="patients-sort-header">
+                <span>Status</span>
+                {renderSortCaret("latest_assessment_status")}
+              </span>
+            </th>
             <th>{patientLabels.singular} Info</th>
           </tr>
         </thead>
@@ -1280,68 +1379,86 @@ const Patients = () => {
                 <td><div className="skeleton-line patients-skeleton-company" /></td>
                 <td><div className="skeleton-line patients-skeleton-date" /></td>
                 <td><div className="skeleton-line patients-skeleton-manage" /></td>
+                <td><div className="skeleton-line patients-skeleton-name" /></td>
+                <td><div className="skeleton-line patients-skeleton-date" /></td>
                 <td><div className="skeleton-line patients-skeleton-actions" /></td>
               </tr>
             ))
           ) : sortedPatients.length === 0 ? (
             <tr>
-              <td colSpan={9}>
+              <td colSpan={11}>
                 <div className="people-empty">No {patientLabels.pluralLower} found.</div>
               </td>
             </tr>
           ) : (
-            sortedPatients.map((p) => (
-              <tr
-                key={p.patient_id}
-                onClick={() => {
-                  setSelectedPatient(p);
-                  setModalMode("view");
-                }}
-                style={{ cursor: "pointer" }}
-              >
-                <td>{p.patient_id}</td>
-                <td>{p.company_patient_id || "—"}</td>
-                <td>{p.first_name}</td>
-                <td>{p.last_name}</td>
-                <td>{p.email}</td>
-                <td>{getCompanyNames(p)}</td>
-                <td>{new Date(p.created_on).toLocaleDateString()}</td>
-                <td>
-                  <button
-                    className="assessments-action-btn"
-                    title="Assessments"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setAssessmentPatient(p);
-                    }}
-                  >
-                    Manage
-                  </button>
-                </td>
-                <td className="actions">
-                  <button
-                    title="View Details"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedPatient(p);
-                      setModalMode("view");
-                    }}
-                  >
-                    👁
-                  </button>
-                  <button
-                    title={`Edit ${patientLabels.singular}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedPatient(p);
-                      setModalMode("edit");
-                    }}
-                  >
-                    ✏️
-                  </button>
-                </td>
-              </tr>
-            ))
+            sortedPatients.map((p) => {
+              const latestAssessmentStatus = LATEST_ASSESSMENT_STATUSES[
+                String(p.latest_assessment_status ?? "").toLowerCase()
+              ];
+
+              return (
+                <tr
+                  key={p.patient_id}
+                  onClick={() => {
+                    setSelectedPatient(p);
+                    setModalMode("view");
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <td>{p.patient_id}</td>
+                  <td>{p.company_patient_id || "—"}</td>
+                  <td>{p.first_name}</td>
+                  <td>{p.last_name}</td>
+                  <td>{p.email}</td>
+                  <td>{getCompanyNames(p)}</td>
+                  <td>{new Date(p.created_on).toLocaleDateString()}</td>
+                  <td>
+                    <button
+                      className="assessments-action-btn"
+                      title="Assessments"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setAssessmentPatient(p);
+                      }}
+                    >
+                      Manage
+                    </button>
+                  </td>
+                  <td>{formatLatestAssessmentCodename(p.latest_assessment_codename)}</td>
+                  <td>
+                    {latestAssessmentStatus ? (
+                      <span className={`latest-assessment-status-pill ${latestAssessmentStatus.className}`}>
+                        {latestAssessmentStatus.label}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="actions">
+                    <button
+                      title="View Details"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedPatient(p);
+                        setModalMode("view");
+                      }}
+                    >
+                      👁
+                    </button>
+                    <button
+                      title={`Edit ${patientLabels.singular}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedPatient(p);
+                        setModalMode("edit");
+                      }}
+                    >
+                      ✏️
+                    </button>
+                  </td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

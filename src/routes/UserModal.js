@@ -154,11 +154,14 @@ const getAddressUserId = (address) => Number(
   0
 );
 
-const formatUserTypeLabel = (value) =>
-  String(value ?? "")
+const formatUserTypeLabel = (value) => {
+  const normalizedValue = String(value ?? "").trim().toLowerCase();
+  if (normalizedValue === "company") return "Company User";
+
+  return normalizedValue
     .replace(/_/g, " ")
-    .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+};
 
 const MIN_INITIAL_PASSWORD_LENGTH = 12;
 const MAX_INITIAL_PASSWORD_LENGTH = 20;
@@ -236,7 +239,7 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
     mode === "add" ? generateDictionaryStylePassword() : ""
   );
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
-  const [userTypeId, setUserTypeId] = useState(user?.user_type?.user_type_id || "");
+  const [userTypeId, setUserTypeId] = useState(getUserTypeId(user) || "");
   const [companies, setCompanies] = useState(user?.companies || []);
   const [phones, setPhones] = useState(user?.phones || []);
   const [addresses, setAddresses] = useState(user?.addresses || []);
@@ -286,15 +289,16 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
   });
 
   const currentUserTypeId = getUserTypeId(currentUser);
+  const canEditUserType = currentUserTypeId > 1;
   const availableUserTypes = useMemo(() => {
-    if (mode !== "add" || currentUserTypeId <= 0) {
+    if (currentUserTypeId <= 0) {
       return userTypes;
     }
 
     return userTypes.filter(
       (type) => Number(type?.user_type_id ?? 0) <= currentUserTypeId
     );
-  }, [currentUserTypeId, mode, userTypes]);
+  }, [currentUserTypeId, userTypes]);
 
   const loadRelatedPhonesAndAddresses = async (targetUserId) => {
     const normalizedUserId = Number(targetUserId);
@@ -827,6 +831,8 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
   };
 
   const openUserTypeModal = () => {
+    if (!canEditUserType) return;
+
     setDraftUserTypeId(String(userTypeId ?? ""));
     setUserTypeModalError("");
     setShowUserTypeModal(true);
@@ -839,9 +845,19 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
   };
 
   const handleSaveUserTypeFromModal = () => {
+    if (!canEditUserType) {
+      setUserTypeModalError("You do not have permission to edit the user type.");
+      return;
+    }
+
     const normalizedDraftUserTypeId = Number(draftUserTypeId);
     if (!Number.isFinite(normalizedDraftUserTypeId) || normalizedDraftUserTypeId <= 0) {
       setUserTypeModalError("User Type is required.");
+      return;
+    }
+
+    if (normalizedDraftUserTypeId > currentUserTypeId) {
+      setUserTypeModalError("You cannot assign a user type higher than your own.");
       return;
     }
 
@@ -919,12 +935,18 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
 
     try {
         const normalizedUserTypeId = Number(userTypeId);
+        const originalUserTypeId = getUserTypeId(user);
+        const isUserTypeChanging = mode === "add" || normalizedUserTypeId !== originalUserTypeId;
         if (!Number.isFinite(normalizedUserTypeId) || normalizedUserTypeId <= 0) {
           throw new Error("User Type is required.");
         }
 
-        if (mode === "add" && currentUserTypeId > 0 && normalizedUserTypeId > currentUserTypeId) {
-          throw new Error("You cannot create a user with a higher user type than your own.");
+        if (mode !== "add" && currentUserTypeId === 1 && isUserTypeChanging) {
+          throw new Error("You do not have permission to edit the user type.");
+        }
+
+        if (isUserTypeChanging && currentUserTypeId > 0 && normalizedUserTypeId > currentUserTypeId) {
+          throw new Error("You cannot assign a user type higher than your own.");
         }
 
         // 1️⃣ Save user
@@ -937,51 +959,19 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
         username,
         email,
         is_active: isActive,
-        user_type_id: normalizedUserTypeId,
+        user_type: normalizedUserTypeId,
         ...(mode === "add" ? { password: initialPassword } : {})
         };
 
-        let res = await apiRequest(url, {
+        const res = await apiRequest(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userBody)
         });
 
         if (!res.ok) {
-          let userSaveErrorData = null;
-          try {
-            userSaveErrorData = await res.json();
-          } catch {
-            userSaveErrorData = null;
-          }
-
-          const expectsUserTypeField =
-            Boolean(userSaveErrorData) &&
-            typeof userSaveErrorData === "object" &&
-            Object.prototype.hasOwnProperty.call(userSaveErrorData, "user_type");
-
-          if (expectsUserTypeField) {
-            const fallbackBody = {
-              first_name: firstName,
-              last_name: lastName,
-              username,
-              email,
-              is_active: isActive,
-              user_type: normalizedUserTypeId,
-              ...(mode === "add" ? { password: initialPassword } : {}),
-            };
-
-            res = await apiRequest(url, {
-              method,
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(fallbackBody),
-            });
-          }
-
-          if (!res.ok) {
-            const errorMessage = await getResponseErrorMessage(res);
-            throw new Error(`User save failed: ${errorMessage}`);
-          }
+          const errorMessage = await getResponseErrorMessage(res);
+          throw new Error(`User save failed: ${errorMessage}`);
         }
 
         const savedUser = await res.json();
@@ -1121,7 +1111,15 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
 
         // 5️⃣ Return updated user to UI
         const refreshedUserRes = await apiRequest(`${API_URL}${userId}/`);
+        if (!refreshedUserRes.ok) {
+          const errorMessage = await getResponseErrorMessage(refreshedUserRes);
+          throw new Error(`User refresh failed: ${errorMessage}`);
+        }
+
         const refreshedUser = await refreshedUserRes.json();
+        if (getUserTypeId(refreshedUser) !== normalizedUserTypeId) {
+          throw new Error("User save failed: the selected user type was not applied.");
+        }
 
         if (typeof onUserUpdated === "function") {
           onUserUpdated(refreshedUser);
@@ -1175,14 +1173,16 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                     {mode === "edit" ? (
                       <span className="user-type-edit-inline">
                         <span>{getSelectedUserTypeLabel()}</span>
-                        <button
-                          type="button"
-                          className="user-type-edit-button"
-                          aria-label="Edit user type"
-                          onClick={openUserTypeModal}
-                        >
-                          <FaEdit />
-                        </button>
+                        {canEditUserType && (
+                          <button
+                            type="button"
+                            className="user-type-edit-button"
+                            aria-label="Edit user type"
+                            onClick={openUserTypeModal}
+                          >
+                            <FaEdit />
+                          </button>
+                        )}
                       </span>
                     ) : mode === "add" ? (
                       <select value={userTypeId} onChange={e => setUserTypeId(e.target.value)}>
@@ -1618,7 +1618,7 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                   }}
                 >
                   <option value="">Select type</option>
-                  {userTypes.map((type) => (
+                  {availableUserTypes.map((type) => (
                     <option key={type.user_type_id} value={type.user_type_id}>
                       {formatUserTypeLabel(type.description)}
                     </option>

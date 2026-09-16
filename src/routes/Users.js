@@ -6,12 +6,35 @@ import { apiRequest } from "../api";
 
 
 const USERS_VIEW_URL = `${process.env.REACT_APP_API_URL_BASE}/api/users-view/`;
+const COMPANIES_URL = `${process.env.REACT_APP_API_URL_BASE}/api/companies/`;
 
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
 
 const getUserId = (user) =>
   Number(user?.user_id ?? user?.id ?? user?.customer_id ?? 0);
+
+const USER_TYPE_PILLS = {
+  company: { label: "User", className: "user" },
+  company_admin: { label: "Admin", className: "admin" },
+  corporate_admin: { label: "Corporate Admin", className: "corporate-admin" },
+};
+
+const getUserTypeDescription = (user) =>
+  String(user?.user_type?.description ?? "").trim().toLowerCase();
+
+const UserTypePill = ({ description }) => {
+  const normalizedDescription = String(description ?? "").trim().toLowerCase();
+  const pill = USER_TYPE_PILLS[normalizedDescription];
+
+  if (!pill) return normalizedDescription || "—";
+
+  return (
+    <span className={`users-type-pill ${pill.className}`}>
+      {pill.label}
+    </span>
+  );
+};
 
 const getUserCompanyIds = (user) => {
   const candidateSources = [
@@ -40,12 +63,15 @@ const Users = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [companyFilterOptions, setCompanyFilterOptions] = useState([]);
+  const [companyFilterId, setCompanyFilterId] = useState("");
   const [sortField, setSortField] = useState("user_id");
   const [sortDirection, setSortDirection] = useState("asc");
   const [selectedUser, setSelectedUser] = useState(null);
   const [modalMode, setModalMode] = useState(null); // "view" | "edit" | "add"
 
   const userTypeId = getUserTypeId(user);
+  const isCorporateAdmin = userTypeId === 3;
   const currentUserId = getUserId(user);
   const currentUserCompanyIds = useMemo(() => getUserCompanyIds(user), [user]);
 
@@ -78,6 +104,41 @@ const Users = () => {
     loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    if (!isCorporateAdmin) {
+      setCompanyFilterOptions([]);
+      setCompanyFilterId("");
+      return;
+    }
+
+    const loadCompanyFilterOptions = async () => {
+      try {
+        const response = await apiRequest(COMPANIES_URL);
+        if (!response.ok) {
+          throw new Error(`Companies request failed (${response.status})`);
+        }
+
+        const companyRows = await response.json();
+        setCompanyFilterOptions(
+          (Array.isArray(companyRows) ? companyRows : [])
+            .filter((company) => Number(company?.company_id ?? company?.id ?? 0) > 0)
+            .sort((left, right) =>
+              String(left?.company_name ?? left?.name ?? "").localeCompare(
+                String(right?.company_name ?? right?.name ?? ""),
+                undefined,
+                { sensitivity: "base" }
+              )
+            )
+        );
+      } catch (error) {
+        console.error("Failed to load company filter options", error);
+        setCompanyFilterOptions([]);
+      }
+    };
+
+    loadCompanyFilterOptions();
+  }, [isCorporateAdmin]);
+
   const getCompanyNames = useCallback(
     (u) => u.companies?.map((c) => c.company_name).join(", ") || "",
     []
@@ -96,6 +157,7 @@ const Users = () => {
       u.last_name.toLowerCase().includes(searchText) ||
       u.username.toLowerCase().includes(searchText) ||
       u.email.toLowerCase().includes(searchText) ||
+      getUserTypeDescription(u).includes(searchText) ||
       getCompanyNames(u).toLowerCase().includes(searchText) ||
       (u.last_login && u.last_login.toLowerCase().includes(searchText))
     );
@@ -116,7 +178,14 @@ const Users = () => {
   }, []);
 
   const visibleUsers = useMemo(() => {
-    if (userTypeId === 3) {
+    if (isCorporateAdmin) {
+      const selectedCompanyId = Number(companyFilterId);
+      if (selectedCompanyId > 0) {
+        return users.filter((listedUser) =>
+          getUserCompanyIds(listedUser).includes(selectedCompanyId)
+        );
+      }
+
       return users;
     }
 
@@ -136,7 +205,7 @@ const Users = () => {
     }
 
     return [];
-  }, [currentUserCompanyIds, currentUserId, userTypeId, users]);
+  }, [companyFilterId, currentUserCompanyIds, currentUserId, isCorporateAdmin, userTypeId, users]);
 
   const sortedUsers = useMemo(() => {
     return [...visibleUsers]
@@ -147,6 +216,10 @@ const Users = () => {
           case "company":
             valA = getCompanyNames(a);
             valB = getCompanyNames(b);
+            break;
+          case "user_type":
+            valA = getUserTypeDescription(a);
+            valB = getUserTypeDescription(b);
             break;
           default:
             valA = a[sortField];
@@ -178,6 +251,25 @@ const Users = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {isCorporateAdmin && (
+          <label className="users-company-filter">
+            <span>Company</span>
+            <select
+              value={companyFilterId}
+              onChange={(event) => setCompanyFilterId(event.target.value)}
+            >
+              <option value="">All</option>
+              {companyFilterOptions.map((company) => {
+                const companyId = company?.company_id ?? company?.id;
+                return (
+                  <option key={companyId} value={companyId}>
+                    {company?.company_name ?? company?.name ?? `Company ${companyId}`}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+        )}
       </div>
 
       {userTypeId !== 1 && (
@@ -204,6 +296,7 @@ const Users = () => {
             <th className="users-col-center" onClick={() => toggleSort("email")}>Email</th>
             <th className="users-col-center" onClick={() => toggleSort("last_login")}>Last Login</th>
             <th className="users-col-center" onClick={() => toggleSort("company")}>Companies</th>
+            <th className="users-col-center" onClick={() => toggleSort("user_type")}>Type</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -219,12 +312,13 @@ const Users = () => {
                 <td><div className="users-skeleton-line users-skeleton-email" /></td>
                 <td><div className="users-skeleton-line users-skeleton-login" /></td>
                 <td><div className="users-skeleton-line users-skeleton-companies" /></td>
+                <td><div className="users-skeleton-line users-skeleton-type" /></td>
                 <td><div className="users-skeleton-line users-skeleton-actions" /></td>
               </tr>
             ))
           ) : sortedUsers.length === 0 ? (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={9}>
                 <div className="users-table-empty">No users found.</div>
               </td>
             </tr>
@@ -254,6 +348,9 @@ const Users = () => {
                   ) : (
                     "—"
                   )}
+                </td>
+                <td className="users-col-center">
+                  <UserTypePill description={u?.user_type?.description} />
                 </td>
                 <td className="actions">
                   <button
