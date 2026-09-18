@@ -2241,6 +2241,8 @@ export default function RunAssessment({
   assessmentId = null,
   patientEventId = null,
   attemptIdOverride = null,
+  companyId = null,
+  generateReportOnSubmit = false,
   skippedQuestionSectionIds = [],
   preferredLanguageCode = "en",
   prefillData = null,
@@ -2311,7 +2313,11 @@ export default function RunAssessment({
 
   const numericPatientId = Number(patientId);
   const numericCompanyId = Number(
-    selectedCompany?.company_id ?? selectedCompany?.id ?? selectedCompany?.company?.company_id ?? 0
+    companyId ??
+    selectedCompany?.company_id ??
+    selectedCompany?.id ??
+    selectedCompany?.company?.company_id ??
+    0
   );
   const numericAssessmentId = Number(assessmentId);
   const numericPatientEventId = Number(patientEventId);
@@ -4813,6 +4819,13 @@ export default function RunAssessment({
               }
             } catch (scoreError) {
               console.error("Failed to update attempt final score", scoreError);
+            }
+
+            if (generateReportOnSubmit && numericCompanyId > 0) {
+              void requestFn(
+                `${API_BASE}/api/generate-report/${numericCompanyId}/${attemptId}`,
+                { keepalive: true }
+              ).catch(() => {});
             }
           } catch (error) {
             console.error("Failed to persist submit", error);

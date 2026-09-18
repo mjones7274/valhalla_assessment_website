@@ -96,6 +96,13 @@
   text-align: center;
 }
 
+.patients-table th:nth-child(9),
+.patients-table td:nth-child(9),
+.patients-table th:nth-child(10),
+.patients-table td:nth-child(10) {
+  text-align: center;
+}
+
 .patients-table td:nth-child(5),
 .patients-table td:nth-child(6),
 .patients-table td:nth-child(7),
@@ -1085,7 +1092,15 @@
   text-align: right;
 }
 
-.assessment-card-refresh-btn {
+.assessment-card-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.assessment-card-refresh-btn,
+.assessment-card-header-icon-btn {
   border: none;
   background: transparent;
   color: #4b5563;
@@ -1098,12 +1113,14 @@
   cursor: pointer;
 }
 
-.assessment-card-refresh-btn:hover:not(:disabled) {
+.assessment-card-refresh-btn:hover:not(:disabled),
+.assessment-card-header-icon-btn:hover:not(:disabled) {
   background: #eef2ff;
   color: #1d4ed8;
 }
 
-.assessment-card-refresh-btn:disabled {
+.assessment-card-refresh-btn:disabled,
+.assessment-card-header-icon-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -1300,6 +1317,117 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.modal.modern.assessment-logs-modal {
+  width: min(1180px, calc(100vw - 40px));
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.assessment-logs-subtitle {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.assessment-logs-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.assessment-logs-table-wrap {
+  overflow: auto;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+}
+
+.assessment-logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.assessment-logs-table th,
+.assessment-logs-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  vertical-align: top;
+}
+
+.assessment-logs-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.assessment-logs-table td {
+  color: #1f2937;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.assessment-logs-table td.assessment-log-field-timestamp,
+.assessment-logs-table td.assessment-log-field-api_call,
+.assessment-logs-table td.assessment-log-field-type {
+  white-space: nowrap;
+}
+
+.assessment-logs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.assessment-log-json {
+  min-width: 280px;
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.assessment-log-response-toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assessment-log-response-toggle .assessment-log-json {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
+.assessment-log-response-toggle.is-expanded .assessment-log-json {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.assessment-log-response-toggle:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .patient-answers-score-pill-wrap {

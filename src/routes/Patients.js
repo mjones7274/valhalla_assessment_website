@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { FaSyncAlt, FaTrash } from "react-icons/fa";
+import { FaListAlt, FaSyncAlt, FaTrash } from "react-icons/fa";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import CognitrackXInvoice from "./CognitrackXInvoice";
@@ -25,6 +25,7 @@ const INJURY_EVENT_TYPES_API = `${API_BASE}/api/injury-event-types/`;
 const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-attempts/`;
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
+const PATIENT_ASSESSMENT_LOGS_API = `${API_BASE}/api/patient-assessment-logs`;
 const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
 const PATIENT_TOKENS_ROTATE_API = `${API_BASE}/api/patient-tokens/rotate/`;
@@ -5191,6 +5192,12 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
   const [answerDocumentLoadingId, setAnswerDocumentLoadingId] = useState(null);
   const [answerDocumentError, setAnswerDocumentError] = useState("");
   const [loadingAnswersAttemptId, setLoadingAnswersAttemptId] = useState(null);
+  const [showAttemptLogsModal, setShowAttemptLogsModal] = useState(false);
+  const [selectedLogsAttempt, setSelectedLogsAttempt] = useState(null);
+  const [attemptLogs, setAttemptLogs] = useState([]);
+  const [attemptLogsLoading, setAttemptLogsLoading] = useState(false);
+  const [attemptLogsError, setAttemptLogsError] = useState("");
+  const [expandedAttemptLogRows, setExpandedAttemptLogRows] = useState(() => new Set());
   const [rotatingTokenAttemptId, setRotatingTokenAttemptId] = useState(null);
   const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
@@ -5910,6 +5917,111 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     const attemptId = getAttemptId(attempt);
     const assessmentId = getAttemptAssessmentId(attempt);
     return `${attemptId ?? "tmp"}-${assessmentId ?? "na"}`;
+  };
+
+  const handleOpenAttemptLogs = async (attempt) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) return;
+
+    setSelectedLogsAttempt(attempt);
+    setAttemptLogs([]);
+    setAttemptLogsError("");
+    setExpandedAttemptLogRows(new Set());
+    setAttemptLogsLoading(true);
+    setShowAttemptLogsModal(true);
+
+    try {
+      const response = await apiRequest(
+        `${PATIENT_ASSESSMENT_LOGS_API}?assessment_attempt=${encodeURIComponent(attemptId)}`
+      );
+
+      if (!response.ok) {
+        const message = await getResponseErrorMessage(response);
+        throw new Error(`Assessment logs request failed: ${message}`);
+      }
+
+      setAttemptLogs(normalizeApiRows(await response.json()));
+    } catch (error) {
+      console.error("Failed to load patient assessment logs", error);
+      setAttemptLogsError(error?.message || "Failed to load assessment logs.");
+    } finally {
+      setAttemptLogsLoading(false);
+    }
+  };
+
+  const attemptLogColumns = useMemo(() => {
+    const excludedFields = new Set([
+      "patient_assessment_log_id",
+      "assessment_attempt_id",
+    ]);
+    const preferredFields = ["timestamp", "api_call", "type", "status_code", "response"];
+    const availableFields = new Set(
+      attemptLogs.flatMap((log) => Object.keys(log || {})).filter((field) => !excludedFields.has(field))
+    );
+
+    return [
+      ...preferredFields.filter((field) => availableFields.has(field)),
+      ...Array.from(availableFields).filter((field) => !preferredFields.includes(field)),
+    ];
+  }, [attemptLogs]);
+
+  const formatAttemptLogColumn = (field) => field
+    .split("_")
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+
+  const renderAttemptLogValue = (field, value, rowKey) => {
+    if (value === null || value === undefined || value === "") return "—";
+
+    if (field === "timestamp") {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
+    }
+
+    if (field === "api_call") {
+      try {
+        const parsedUrl = new URL(String(value), window.location.origin);
+        return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+      } catch {
+        return String(value);
+      }
+    }
+
+    if (field === "response") {
+      const responseText = typeof value === "object"
+        ? JSON.stringify(value, null, 2)
+        : String(value);
+      const isExpanded = expandedAttemptLogRows.has(rowKey);
+
+      return (
+        <button
+          type="button"
+          className={`assessment-log-response-toggle ${isExpanded ? "is-expanded" : ""}`}
+          aria-expanded={isExpanded}
+          title={isExpanded ? "Collapse response" : "Expand response"}
+          onClick={() => {
+            setExpandedAttemptLogRows((previousRows) => {
+              const nextRows = new Set(previousRows);
+              if (nextRows.has(rowKey)) {
+                nextRows.delete(rowKey);
+              } else {
+                nextRows.add(rowKey);
+              }
+              return nextRows;
+            });
+          }}
+        >
+          <pre className="assessment-log-json">{responseText}</pre>
+        </button>
+      );
+    }
+
+    if (typeof value === "object") {
+      return <pre className="assessment-log-json">{JSON.stringify(value, null, 2)}</pre>;
+    }
+
+    return String(value);
   };
 
   const fetchAttemptProgressByAttemptId = useCallback(async (attemptId) => {
@@ -6951,18 +7063,32 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                             {linkFeedbackMessage}
                           </div>
                         )}
-                        {!isDisabledForActions && (
-                          <button
-                            type="button"
-                            className="assessment-card-refresh-btn"
-                            title="Refresh this assessment"
-                            aria-label="Refresh this assessment"
-                            onClick={() => handleRefreshAttemptCard(attempt)}
-                            disabled={isRefreshingCard || !attemptId}
-                          >
-                            <FaSyncAlt className={isRefreshingCard ? "spin" : ""} />
-                          </button>
-                        )}
+                        <div className="assessment-card-header-actions">
+                          {userTypeId === 3 && (
+                            <button
+                              type="button"
+                              className="assessment-card-header-icon-btn"
+                              title="View assessment logs"
+                              aria-label="View assessment logs"
+                              onClick={() => handleOpenAttemptLogs(attempt)}
+                              disabled={!attemptId}
+                            >
+                              <FaListAlt />
+                            </button>
+                          )}
+                          {!isDisabledForActions && (
+                            <button
+                              type="button"
+                              className="assessment-card-refresh-btn"
+                              title="Refresh this assessment"
+                              aria-label="Refresh this assessment"
+                              onClick={() => handleRefreshAttemptCard(attempt)}
+                              disabled={isRefreshingCard || !attemptId}
+                            >
+                              <FaSyncAlt className={isRefreshingCard ? "spin" : ""} />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="assessment-card-meta">
@@ -7351,6 +7477,63 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
               <div className="modal-actions">
                 <button onClick={() => setShowAnswersModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAttemptLogsModal && (
+          <div className="modal-overlay" style={{ zIndex: 1300 }}>
+            <div className="modal modern assessment-logs-modal">
+              <div className="modal-header">
+                <div>
+                  <h3>Assessment Logs</h3>
+                  <div className="assessment-logs-subtitle">
+                    {`${getAssessmentName(selectedLogsAttempt)} - Attempt ${getAttemptId(selectedLogsAttempt) ?? "—"}`}
+                  </div>
+                </div>
+                <button className="icon-close" onClick={() => setShowAttemptLogsModal(false)}>✕</button>
+              </div>
+
+              <div className="assessment-logs-modal-body">
+                {attemptLogsLoading ? (
+                  <div className="people-empty">Loading assessment logs...</div>
+                ) : attemptLogsError ? (
+                  <div className="api-debug-error">{attemptLogsError}</div>
+                ) : attemptLogs.length === 0 ? (
+                  <div className="people-empty">No logs found for this assessment attempt.</div>
+                ) : (
+                  <div className="assessment-logs-table-wrap">
+                    <table className="assessment-logs-table">
+                      <thead>
+                        <tr>
+                          {attemptLogColumns.map((field) => (
+                            <th key={field}>{formatAttemptLogColumn(field)}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {attemptLogs.map((log, index) => {
+                          const rowKey = log?.patient_assessment_log_id ?? `assessment-log-${index}`;
+
+                          return (
+                            <tr key={rowKey}>
+                              {attemptLogColumns.map((field) => (
+                                <td key={field} className={`assessment-log-field-${field}`}>
+                                  {renderAttemptLogValue(field, log?.[field], rowKey)}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowAttemptLogsModal(false)}>Close</button>
               </div>
             </div>
           </div>

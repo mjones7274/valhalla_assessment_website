@@ -392,6 +392,12 @@ export default function TakeAssessment() {
     attempt?.patient?.companies?.[0]?.company ??
     attempt?.patient?.companies?.[0] ??
     null;
+  const companyId = Number(
+    companyFromAttempt?.company_id ??
+    companyFromAttempt?.id ??
+    attempt?.company_id ??
+    0
+  ) || null;
 
   const companyName =
     selectedCompany?.company_name ??
@@ -737,6 +743,8 @@ export default function TakeAssessment() {
       patient={attempt?.patient ?? null}
       patientEventId={patientEventId}
       attemptIdOverride={attemptIdOverride}
+      companyId={companyId}
+      generateReportOnSubmit={true}
       skippedQuestionSectionIds={skippedQuestionSectionIds}
       preferredLanguageCode={preferredLanguageCode}
       prefillData={{
