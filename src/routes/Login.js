@@ -38,46 +38,66 @@ function Login() {
   return (
     <div className="login-page">
       <div className="login-container">
-      <form onSubmit={handleSubmit}>
-        <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Sign In</h2>
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          style={{ padding: "10px", marginBottom: "15px", borderRadius: "4px", border: "1px solid #ccc" }}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          style={{ padding: "10px", marginBottom: "15px", borderRadius: "4px", border: "1px solid #ccc" }}
-        />
-        {error && <p style={{ color: "red", marginBottom: "10px" }}>{error}</p>}
-        <button
-          type="submit"
-          disabled={isAuthenticating}
-          style={{
-            padding: "10px",
-            backgroundColor: "#000",
-            color: "#fff",
-            border: "none",
-            borderRadius: "6px",
-            cursor: isAuthenticating ? "not-allowed" : "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "8px",
-            opacity: isAuthenticating ? 0.85 : 1,
-          }}
-        >
-          {isAuthenticating && <span className="login-button-spinner" aria-hidden="true" />}
-          {isAuthenticating ? "Signing In..." : "Sign In"}
-        </button>
-      </form>
+        <div className="login-intro" aria-hidden="true">
+          <img
+            className="login-brand-mark"
+            src={`${process.env.PUBLIC_URL}/favicon.ico`}
+            alt=""
+          />
+          <div className="login-intro-copy">
+            <p className="login-eyebrow">Valhalla Assessments</p>
+            <h2>Clinical TBI Assessments</h2>
+            <p>
+              Secure access to patient assessments, progress, and reporting in one
+              focused workspace.
+            </p>
+          </div>
+        </div>
+
+        <form className="login-form" onSubmit={handleSubmit}>
+          <div className="login-form-heading">
+            <p className="login-eyebrow">Welcome back</p>
+            <h2>Sign in to your account</h2>
+            <p>Enter your portal credentials to continue.</p>
+          </div>
+
+          <div className="login-field">
+            <label htmlFor="login-username">Username</label>
+            <input
+              id="login-username"
+              type="text"
+              autoComplete="username"
+              placeholder="Enter your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+            />
+          </div>
+
+          <div className="login-field">
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+
+          {error && (
+            <p className="login-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button className="login-submit" type="submit" disabled={isAuthenticating}>
+            {isAuthenticating && <span className="login-button-spinner" aria-hidden="true" />}
+            {isAuthenticating ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
       </div>
     </div>
   );

@@ -441,7 +441,12 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
 
 
   const removeCompany = (companyKey) => {
-    setCompanies(companies.filter((company) => getCompanyRowKey(company) !== companyKey));
+    setCompanies((currentCompanies) => {
+      if (currentCompanies.length <= 1) return currentCompanies;
+      return currentCompanies.filter(
+        (company) => getCompanyRowKey(company) !== companyKey
+      );
+    });
   };
 
   const openAddPhoneModal = () => {
@@ -1285,14 +1290,18 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                   ) : (
                     <div className="user-companies-list">
                       {companies.map(c => (
-                        <div key={getCompanyRowKey(c) ?? `company-${c.company_name}`} className="nested-row">
-                          {c.company_name}
-                          {isEdit && (
-                            <FaTrash
-                              className="icon-button"
-                              style={{ color: "#111827" }}
-                              onClick={()=>removeCompany(getCompanyRowKey(c))}
-                            />
+                        <div key={getCompanyRowKey(c) ?? `company-${c.company_name}`} className="nested-row user-company-row">
+                          <span className="user-company-name">{c.company_name}</span>
+                          {mode === "edit" && companies.length > 1 && (
+                            <button
+                              type="button"
+                              className="user-company-remove-btn"
+                              onClick={() => removeCompany(getCompanyRowKey(c))}
+                              title={`Remove ${c.company_name}`}
+                              aria-label={`Remove ${c.company_name} from this user`}
+                            >
+                              <FaTrash aria-hidden="true" />
+                            </button>
                           )}
                         </div>
                       ))}

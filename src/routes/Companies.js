@@ -66,6 +66,17 @@ const DEFAULT_BODY_IQ_ORDER_DATA = JSON.stringify({
 const getUserTypeId = (user) =>
   Number(user?.user_type_id ?? user?.user_type?.user_type_id ?? user?.user_type?.id ?? 0);
 
+const isCompanyApiTestMode = (company) => {
+  const value = company?.api_test_mode;
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+  return value === true || value === 1;
+};
+
+const getProductionStatusLabel = (company) =>
+  isCompanyApiTestMode(company) ? "API Test" : "Production";
+
 const readErrorMessage = async (response, fallbackMessage) => {
   try {
     const contentType = response.headers.get("content-type") || "";
@@ -511,6 +522,7 @@ const Companies = () => {
       c.company_name.toLowerCase().includes(searchText) ||
       c.contact_name.toLowerCase().includes(searchText) ||
       c.contact_email.toLowerCase().includes(searchText) ||
+      getProductionStatusLabel(c).toLowerCase().includes(searchText) ||
       c.created_on.toLowerCase().includes(searchText)
     );
   }, [search]);
@@ -525,6 +537,10 @@ const Companies = () => {
           case "company_type":
             valA = getCompanyTypeDescription(a);
             valB = getCompanyTypeDescription(b);
+            break;
+          case "production_status":
+            valA = getProductionStatusLabel(a);
+            valB = getProductionStatusLabel(b);
             break;
           default:
             valA = a[sortField];
@@ -552,28 +568,43 @@ const Companies = () => {
 
   return (
     <div className="companies-page">
-      <h1>Companies</h1>
-        <div className="companies-toolbar">
+      <header className="portal-page-header">
+        <div>
+          <p className="portal-page-kicker">Organization management</p>
+          <h1 className="portal-page-title">
+            Companies
+            <span className="portal-page-count">{sortedCompanies.length}</span>
+          </h1>
+          <p className="portal-page-subtitle">Manage organizations, access, and production status.</p>
+        </div>
+        <div className="portal-page-actions">
+          <button
+            className="primary portal-primary-action"
+            onClick={() => {
+              setSelectedCompany(null);
+              setModalMode("add");
+            }}
+          >
+            + Add New Company
+          </button>
+        </div>
+      </header>
+
+        <div className="companies-toolbar portal-command-bar">
+      <label className="portal-search-field" htmlFor="companies-search">
+      <span>Search</span>
             <input
-                className="search-bar"
+        id="companies-search"
+                className="search-bar portal-search-input"
                 placeholder="Search companies..."
+                aria-label="Search companies"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
             />
+      </label>
         </div>
-      <div className="companies-actions">
-        <button
-          className="primary"
-          style={{ marginBottom: "12px" }}
-          onClick={() => {
-            setSelectedCompany(null);
-            setModalMode("add");
-          }}
-          >
-          + Add New Company
-        </button>
-      </div>
 
+      <div className="portal-table-shell">
       <table className="companies-table">
         <thead>
           <tr>
@@ -582,6 +613,7 @@ const Companies = () => {
             <th onClick={() => toggleSort("company_type")}>Company Type</th>
             <th onClick={() => toggleSort("is_active")}>Status</th>
             <th onClick={() => toggleSort("created_on")}>Created</th>
+            <th onClick={() => toggleSort("production_status")}>Production Status</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -595,12 +627,13 @@ const Companies = () => {
                 <td><div className="companies-skeleton-line companies-skeleton-type" /></td>
                 <td><div className="companies-skeleton-line companies-skeleton-status" /></td>
                 <td><div className="companies-skeleton-line companies-skeleton-date" /></td>
+                <td><div className="companies-skeleton-line companies-skeleton-status" /></td>
                 <td><div className="companies-skeleton-line companies-skeleton-actions" /></td>
               </tr>
             ))
           ) : sortedCompanies.length === 0 ? (
             <tr>
-              <td colSpan={6}>
+              <td colSpan={7}>
                 <div className="companies-table-empty">No companies found.</div>
               </td>
             </tr>
@@ -623,6 +656,11 @@ const Companies = () => {
                   </span>
                 </td>
                 <td>{new Date(c.created_on).toLocaleDateString()}</td>
+                <td>
+                  <span className={`production-status-pill ${isCompanyApiTestMode(c) ? "api-test" : "production"}`}>
+                    {getProductionStatusLabel(c)}
+                  </span>
+                </td>
                 <td className="actions">
                   <button
                     title="View Details"
@@ -650,6 +688,7 @@ const Companies = () => {
           )}
         </tbody>
       </table>
+      </div>
 
       {modalMode && (
         modalMode === "add" ? (

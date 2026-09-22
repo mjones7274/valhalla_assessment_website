@@ -242,15 +242,42 @@ const Users = () => {
 
   return (
     <div className="users-page">
-      <h2>Users</h2>
+      <header className="portal-page-header">
+        <div>
+          <p className="portal-page-kicker">Access management</p>
+          <h1 className="portal-page-title">
+            Users
+            <span className="portal-page-count">{sortedUsers.length}</span>
+          </h1>
+          <p className="portal-page-subtitle">Manage portal access, roles, and company assignments.</p>
+        </div>
+        {userTypeId !== 1 && (
+          <div className="portal-page-actions">
+            <button
+              className="primary portal-primary-action"
+              onClick={() => {
+                setSelectedUser(null);
+                setModalMode("add");
+              }}
+            >
+              + Add New User
+            </button>
+          </div>
+        )}
+      </header>
 
-      <div className="users-toolbar">
-        <input
-          className="search-bar"
-          placeholder="Search users..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="users-toolbar portal-command-bar">
+        <label className="portal-search-field" htmlFor="users-search">
+          <span>Search</span>
+          <input
+            id="users-search"
+            className="search-bar portal-search-input"
+            placeholder="Search users..."
+            aria-label="Search users"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
         {isCorporateAdmin && (
           <label className="users-company-filter">
             <span>Company</span>
@@ -272,20 +299,7 @@ const Users = () => {
         )}
       </div>
 
-      {userTypeId !== 1 && (
-        <div className="users-actions">
-          <button
-            className="primary"
-            onClick={() => {
-              setSelectedUser(null);
-              setModalMode("add");
-            }}
-          >
-            + Add New User
-          </button>
-        </div>
-      )}
-
+      <div className="portal-table-shell">
       <table className="users-table">
         <thead>
           <tr>
@@ -379,6 +393,7 @@ const Users = () => {
           )}
         </tbody>
       </table>
+      </div>
 
       {modalMode && (
         modalMode === "add" ? (

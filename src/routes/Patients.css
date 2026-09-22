@@ -1,6 +1,6 @@
 .patients-page {
-  padding: 16px 34px;
-  max-width: 1400px;
+  padding: 16px 22px;
+  max-width: 1680px;
   margin: 0 auto;
 }
 
@@ -76,6 +76,10 @@
 .patients-table th:nth-child(2),
 .patients-table td:nth-child(2) {
   width: 1%;
+  white-space: nowrap;
+}
+
+.patients-table th:nth-child(1) {
   white-space: nowrap;
 }
 
@@ -232,6 +236,7 @@
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .latest-assessment-status-pill.assigned {
@@ -245,8 +250,8 @@
 }
 
 .latest-assessment-status-pill.completed {
-  background: #dcfce7;
-  color: #166534;
+  background: #15803d;
+  color: #f0fdf4;
 }
 
 .patients-page .assessments-action-btn {
@@ -648,6 +653,47 @@
   background: #ffffff;
   color: #0f172a;
   font-size: 0.9rem;
+}
+
+.patients-company-filter-group {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.patients-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.patients-refresh-btn:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #1d4ed8;
+}
+
+.patients-refresh-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.patients-refresh-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.patients-refresh-btn .spin {
+  animation: assessment-refresh-spin 0.8s linear infinite;
 }
 
 .patients-actions {
@@ -1197,13 +1243,13 @@
 }
 
 .assessment-status-badge.completed {
-  background: #dcfce7;
-  color: #166534;
+  background: #15803d;
+  color: #f0fdf4;
 }
 
 .assessment-status-badge.assigned {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .assessment-status-badge.in_progress {
@@ -1295,6 +1341,79 @@
 .patient-assessments-modal .assessment-card-actions .remove-assessment-btn {
   padding: 4px 8px;
   font-size: 0.78rem;
+}
+
+.modal-overlay:has(.patient-assessments-modal) {
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal.modern.patient-assessments-modal {
+  background: #17233a;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.patient-assessments-modal .modal-header h3,
+.patient-assessments-modal .assessment-card-title {
+  color: #f8fbff;
+}
+
+.patient-assessments-modal .assessment-dropdown-label,
+.patient-assessments-modal .checkbox-row,
+.patient-assessments-modal .assessment-card-meta,
+.patient-assessments-modal .assessment-card-event,
+.patient-assessments-modal .assessment-progress-text,
+.patient-assessments-modal .people-empty {
+  color: #cbd5e1;
+}
+
+.patient-assessments-modal .assessment-card-meta strong,
+.patient-assessments-modal .assessment-card-event strong {
+  color: #7dd3fc;
+}
+
+.patient-assessments-modal .assessment-event-dropdown-trigger,
+.patient-assessments-modal .assessment-assign-row select {
+  background: #0f1a2d !important;
+  border: 1px solid #334766 !important;
+  color: #f8fbff !important;
+  color-scheme: dark;
+}
+
+.patient-assessments-modal .assessment-event-dropdown-menu {
+  background: #0f1a2d;
+  border-color: #334766;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+
+.patient-assessments-modal .assessment-event-dropdown-option {
+  color: #dbeafe !important;
+}
+
+.patient-assessments-modal .assessment-event-dropdown-option:hover {
+  background: rgba(125, 211, 252, 0.12) !important;
+  color: #f8fbff !important;
+}
+
+.patient-assessments-modal .assessment-card {
+  background: #121c2e;
+  border-color: #253551;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.patient-assessments-modal .assessment-progress-inline progress::-webkit-progress-bar {
+  background: #253551;
+}
+
+.patient-assessments-modal .assessment-card-link-feedback {
+  color: #86efac;
+}
+
+.patient-assessments-modal .skeleton-line {
+  background: linear-gradient(90deg, #1e2c46 25%, #2b3d5d 37%, #1e2c46 63%);
+  background-size: 400% 100%;
 }
 
 .modal.modern.patient-answers-modal {
@@ -1399,14 +1518,14 @@
 }
 
 .assessment-log-response-toggle {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
+}
+
+.assessment-log-response-toggle .assessment-log-json {
+  flex: 1 1 auto;
 }
 
 .assessment-log-response-toggle .assessment-log-json {
@@ -1415,6 +1534,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
   line-clamp: 4;
+  user-select: text;
 }
 
 .assessment-log-response-toggle.is-expanded .assessment-log-json {
@@ -1424,10 +1544,31 @@
   line-clamp: unset;
 }
 
-.assessment-log-response-toggle:focus-visible {
+.assessment-log-response-expand-btn {
+  flex: 0 0 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #475569;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.assessment-log-response-expand-btn:hover {
+  background: #e2e8f0;
+  color: #1d4ed8;
+}
+
+.assessment-log-response-expand-btn:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
-  border-radius: 6px;
 }
 
 .patient-answers-score-pill-wrap {
@@ -1976,6 +2117,102 @@
 .patient-profile-layout .events-section-full-width .events-table-wrap,
 .patient-profile-layout .events-section-full-width .user-address-add-btn {
   margin-left: 0;
+}
+
+.modal-overlay:has(.patient-modal) {
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal.modern.patient-modal {
+  background: #17233a;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.patient-modal .modal-header h3,
+.patient-modal .patient-profile-name,
+.patient-modal .patient-profile-field-value,
+.patient-modal .people-name,
+.patient-modal .user-phone-card-body,
+.patient-modal .user-address-card-body {
+  color: #f8fbff;
+}
+
+.patient-modal .patient-profile-identity-card,
+.patient-modal .patient-profile-fields-card,
+.patient-modal .patient-data-card,
+.patient-modal .patient-profile-right .people-section,
+.patient-modal .patient-profile-right .order-history-section,
+.patient-modal .patient-profile-right .events-section,
+.patient-modal .patient-profile-right .user-addresses-section,
+.patient-modal .patient-profile-layout .events-section-full-width {
+  background: #121c2e;
+  border-color: #253551;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.patient-modal .patient-profile-field-row,
+.patient-modal .patient-profile-order-row,
+.patient-modal .patient-data-card-header,
+.patient-modal .patient-data-card-header-row {
+  border-color: #253551;
+}
+
+.patient-modal .patient-profile-field-label,
+.patient-modal .user-phone-card-top strong,
+.patient-modal .user-address-card-top strong,
+.patient-modal .people-type,
+.patient-modal .people-empty,
+.patient-modal .user-addresses-empty,
+.patient-modal .order-history-date {
+  color: #cbd5e1;
+}
+
+.patient-modal .patient-profile-avatar {
+  background: linear-gradient(135deg, #14b8a6 0%, #2563eb 100%);
+  color: #f8fbff;
+}
+
+.patient-modal .patient-data-card-header,
+.patient-modal .patient-data-card-header-row .collapsible-section-toggle,
+.patient-modal .patient-card-chevron {
+  color: #dbeafe;
+}
+
+.patient-modal .user-phone-card,
+.patient-modal .user-address-card,
+.patient-modal .people-row {
+  background: #17233a;
+  border-color: #253551;
+  color: #f8fbff;
+}
+
+.patient-modal .patient-profile-field-value input,
+.patient-modal .patient-profile-field-value select,
+.patient-modal .detail-value input,
+.patient-modal .detail-value select,
+.patient-modal .detail-value textarea {
+  background: #0f1a2d;
+  border-color: #334766;
+  color: #f8fbff;
+  color-scheme: dark;
+}
+
+.patient-modal .patient-profile-field-value input:focus,
+.patient-modal .patient-profile-field-value select:focus,
+.patient-modal .detail-value input:focus,
+.patient-modal .detail-value select:focus,
+.patient-modal .detail-value textarea:focus {
+  border-color: #38bdf8;
+  outline: 2px solid rgba(56, 189, 248, 0.2);
+  outline-offset: 1px;
+}
+
+.patient-modal input::placeholder,
+.patient-modal textarea::placeholder {
+  color: #7f8eaa;
 }
 
 @media (max-width: 900px) {

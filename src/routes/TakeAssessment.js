@@ -77,7 +77,7 @@ const InfoDialog = ({ title, message, onClose }) => (
     style={{
       position: "fixed",
       inset: 0,
-      backgroundColor: "rgba(0,0,0,0.4)",
+      backgroundColor: "rgba(3, 7, 18, 0.82)",
       display: "flex",
       justifyContent: "center",
       alignItems: "center",
@@ -86,15 +86,16 @@ const InfoDialog = ({ title, message, onClose }) => (
   >
     <div
       style={{
-        background: "#fff",
+        background: "#17233a",
+        border: "1px solid #253551",
         padding: "24px",
         width: "440px",
         borderRadius: "8px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.42)",
       }}
     >
-      <h3 style={{ marginBottom: "12px", color: "#dc3545" }}>{title}</h3>
-      <p style={{ marginBottom: "20px", color: "#444" }}>{message}</p>
+      <h3 style={{ marginBottom: "12px", color: "#f8fbff" }}>{title}</h3>
+      <p style={{ marginBottom: "20px", color: "#cbd5e1" }}>{message}</p>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button onClick={onClose}>OK</button>
       </div>
@@ -107,7 +108,7 @@ const SessionExpiredDialog = ({ onOk }) => (
     style={{
       position: "fixed",
       inset: 0,
-      backgroundColor: "rgba(0,0,0,0.4)",
+      backgroundColor: "rgba(3, 7, 18, 0.82)",
       display: "flex",
       justifyContent: "center",
       alignItems: "center",
@@ -116,14 +117,15 @@ const SessionExpiredDialog = ({ onOk }) => (
   >
     <div
       style={{
-        background: "#fff",
+        background: "#17233a",
+        border: "1px solid #253551",
         padding: "24px",
         width: "520px",
         borderRadius: "8px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.42)",
       }}
     >
-      <p style={{ marginBottom: "20px", color: "#444", lineHeight: 1.4 }}>
+      <p style={{ marginBottom: "20px", color: "#cbd5e1", lineHeight: 1.4 }}>
         Your session has expired due to no activity.  Use the original link to continue where you left off, or refresh this page
       </p>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -566,7 +568,7 @@ export default function TakeAssessment() {
   );
 
   if (isSessionExpiredAcknowledged) {
-    return <div style={{ background: "#fff", height: "100vh", width: "100vw" }} />;
+    return <div style={{ background: "#0b1220", height: "100vh", width: "100vw" }} />;
   }
 
   if (isSessionExpired) {

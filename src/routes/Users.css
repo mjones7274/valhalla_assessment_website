@@ -712,7 +712,47 @@
 }
 
 .user-companies-list {
-  margin-left: 12px;
+  display: grid;
+  gap: 6px;
+  margin-left: 0;
+}
+
+.user-company-row {
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  margin-bottom: 0;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.user-company-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root .user-company-remove-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 !important;
+  border: 1px solid rgba(248, 113, 113, 0.24) !important;
+  border-radius: 5px !important;
+  background: rgba(248, 113, 113, 0.08) !important;
+  color: #ef4444 !important;
+  font-size: 0.72rem;
+}
+
+#root .user-company-remove-btn:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.42) !important;
+  background: rgba(248, 113, 113, 0.15) !important;
+  color: #dc2626 !important;
 }
 
 .user-companies-select {
@@ -770,4 +810,107 @@
   .user-profile-layout {
     grid-template-columns: 1fr;
   }
+}
+
+/* Report-inspired User view/edit theme */
+.modal-overlay:has(> .user-profile-modal),
+.modal-overlay:has(> .user-profile-modal) .modal-overlay {
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal-overlay:has(> .user-profile-modal) .modal.modern {
+  background: #17233a !important;
+  background-color: #17233a !important;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.user-profile-modal .modal-header h3,
+.user-profile-modal .user-profile-name,
+.user-profile-modal .user-profile-meta-value,
+.user-profile-modal .user-profile-field-value,
+.user-profile-modal .user-phone-card-body,
+.user-profile-modal .user-address-card-body,
+.user-profile-modal .nested-row {
+  color: #f8fbff;
+}
+
+.user-profile-modal .user-profile-identity-card,
+.user-profile-modal .user-profile-fields-card,
+.user-profile-modal .user-data-card {
+  background: #121c2e;
+  border-color: #253551;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.user-profile-modal .user-profile-meta,
+.user-profile-modal .user-profile-field-row,
+.user-profile-modal .user-data-card-header,
+.user-profile-modal .user-addresses-section {
+  border-color: #253551;
+}
+
+.user-profile-modal .user-profile-meta-label,
+.user-profile-modal .user-profile-field-label,
+.user-profile-modal .user-data-empty,
+.user-profile-modal .user-addresses-empty,
+.user-profile-modal .user-phone-card-top strong,
+.user-profile-modal .user-address-card-top strong,
+.user-profile-modal .user-address-card-body p span {
+  color: #cbd5e1;
+}
+
+.user-profile-modal .user-profile-avatar {
+  background: linear-gradient(135deg, #14b8a6 0%, #2563eb 100%);
+  color: #f8fbff;
+}
+
+.user-profile-modal .user-data-card-header,
+.user-profile-modal .user-card-chevron {
+  color: #dbeafe;
+}
+
+.user-profile-modal .user-phone-card,
+.user-profile-modal .user-address-card,
+.user-profile-modal .user-company-row {
+  background: #17233a;
+  border-color: #253551;
+}
+
+.user-profile-modal .user-company-name {
+  color: #f8fbff;
+}
+
+.modal-overlay:has(> .user-profile-modal) .detail-label {
+  color: #cbd5e1;
+}
+
+.user-profile-modal .user-profile-field-value input,
+.user-profile-modal .user-profile-field-value select,
+.user-profile-modal .user-profile-meta-value select,
+.modal-overlay:has(> .user-profile-modal) .detail-value input,
+.modal-overlay:has(> .user-profile-modal) .detail-value select,
+.modal-overlay:has(> .user-profile-modal) .detail-value textarea {
+  background: #0f1a2d;
+  border-color: #334766;
+  color: #f8fbff;
+  color-scheme: dark;
+}
+
+.user-profile-modal .user-profile-field-value input:focus,
+.user-profile-modal .user-profile-field-value select:focus,
+.user-profile-modal .user-profile-meta-value select:focus,
+.modal-overlay:has(> .user-profile-modal) .detail-value input:focus,
+.modal-overlay:has(> .user-profile-modal) .detail-value select:focus,
+.modal-overlay:has(> .user-profile-modal) .detail-value textarea:focus {
+  border-color: #38bdf8;
+  outline: 2px solid rgba(56, 189, 248, 0.2);
+  outline-offset: 1px;
+}
+
+.modal-overlay:has(> .user-profile-modal) input::placeholder,
+.modal-overlay:has(> .user-profile-modal) textarea::placeholder {
+  color: #7f8eaa;
 }

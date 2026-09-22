@@ -98,6 +98,22 @@ const AppHeader = ({ loggedIn, setLoggedIn, user }) => {
   return (
     <header className="app-header">
       <div className="header-top-row">
+        <div className="header-copy">
+          <img
+            className="header-brand-icon"
+            src={`${process.env.PUBLIC_URL}/favicon.ico`}
+            alt=""
+          />
+          <div className="header-brand-text">
+            <h1 className="header-title">Valhalla TBI Portal</h1>
+            <p className="header-subtitle">Clinical TBI Assessments</p>
+          </div>
+          {showApiUrl && (
+            <span className="header-api-url" title={process.env.REACT_APP_API_URL_BASE}>
+              Development
+            </span>
+          )}
+        </div>
         <Navbar
           loggedIn={loggedIn}
           setLoggedIn={setLoggedIn}
@@ -105,16 +121,6 @@ const AppHeader = ({ loggedIn, setLoggedIn, user }) => {
           headerAccountLabel={headerAccountLabel}
           selectedCompany={selectedCompany}
         />
-      </div>
-
-      <div className="header-copy">
-        <h1 className="header-title">Valhalla TBI Portal</h1>
-        <p className="header-subtitle">Specialized in TBI Treatment and Assessment</p>
-        {showApiUrl && (
-          <p className="header-api-url">
-            API: {process.env.REACT_APP_API_URL_BASE}
-          </p>
-        )}
       </div>
     </header>
   );
@@ -134,6 +140,9 @@ const AppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const hideChrome = location.pathname.startsWith("/take-assessment/");
+  const showMainPageGrid = ["/", "/patients", "/companies", "/users", "/assessments"].includes(
+    location.pathname
+  );
   const expiredDialogShownRef = React.useRef(false);
   const lastActivityRecordedAtRef = React.useRef(0);
   const lastSessionPolicyCheckAtRef = React.useRef(Date.now());
@@ -400,7 +409,11 @@ const AppLayout = () => {
         />
       )}
 
-      <div style={{ paddingTop: hideChrome ? 0 : "20px" }}>
+      <div
+        className={`${hideChrome ? "app-main app-main-fullscreen" : "app-main"}${
+          showMainPageGrid ? " app-main-grid" : ""
+        }`}
+      >
         <Outlet context={{ loggedIn, setLoggedIn, user, setUser }} />
       </div>
 

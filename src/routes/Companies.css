@@ -46,9 +46,12 @@
 
 .companies-table th:nth-child(4),
 .companies-table td:nth-child(4),
-.companies-table td:nth-child(5),
 .companies-table th:nth-child(5),
-.companies-table td:nth-child(6) {
+.companies-table td:nth-child(5),
+.companies-table th:nth-child(6),
+.companies-table td:nth-child(6),
+.companies-table th:nth-child(7),
+.companies-table td:nth-child(7) {
   text-align: center;
 }
 
@@ -58,6 +61,35 @@
 
 .companies-table tbody tr:hover {
   background: #f8fbff;
+}
+
+.production-status-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.production-status-pill.production {
+  background: #15803d;
+}
+
+.production-status-pill.api-test {
+  background: #b45309;
+}
+
+.companies-table .status-pill.active {
+  background: #15803d;
+  color: #ffffff;
+}
+
+.companies-table .status-pill.inactive {
+  background: #b91c1c;
+  color: #ffffff;
 }
 
 @keyframes companies-skeleton-shimmer {
@@ -956,6 +988,102 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Report-inspired Company view/edit theme */
+.modal-overlay:has(.company-form-modal),
+.company-form-modal .modal-overlay {
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal.modern.company-form-modal,
+.company-form-modal .modal.modern {
+  background: #17233a;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.company-form-modal .modal-header h3,
+.company-form-modal .company-profile-name,
+.company-form-modal .company-profile-field-value,
+.company-form-modal .integration-field-value,
+.company-form-modal .people-name {
+  color: #f8fbff;
+}
+
+.company-form-modal .company-profile-identity-card,
+.company-form-modal .company-profile-fields-card,
+.company-form-modal .company-data-card {
+  background: #121c2e;
+  border-color: #253551;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.company-form-modal .company-profile-field-row,
+.company-form-modal .integration-field-row,
+.company-form-modal .company-data-card-header {
+  border-color: #253551;
+}
+
+.company-form-modal .company-profile-field-label,
+.company-form-modal .integration-field-label,
+.company-form-modal .people-type,
+.company-form-modal .people-empty,
+.company-form-modal .detail-label {
+  color: #cbd5e1;
+}
+
+.company-form-modal .company-profile-avatar,
+.company-form-modal .company-logo-modal-preview-fallback {
+  background: linear-gradient(135deg, #14b8a6 0%, #2563eb 100%);
+  color: #f8fbff;
+}
+
+.company-form-modal .company-profile-logo-image,
+.company-form-modal .company-logo-modal-preview-pane {
+  background: #0f1a2d;
+  border-color: #334766;
+}
+
+.company-form-modal .company-data-card-header,
+.company-form-modal .company-data-card-toggle,
+.company-form-modal .company-data-card-toggle-icon {
+  color: #dbeafe;
+}
+
+.company-form-modal .people-row {
+  background: #17233a;
+  border-color: #253551;
+}
+
+.company-form-modal .company-profile-field-value input,
+.company-form-modal .company-profile-field-value select,
+.company-form-modal .integration-field-value input,
+.company-form-modal .detail-value input,
+.company-form-modal .detail-value select,
+.company-form-modal .detail-value textarea {
+  background: #0f1a2d;
+  border-color: #334766;
+  color: #f8fbff;
+  color-scheme: dark;
+}
+
+.company-form-modal .company-profile-field-value input:focus,
+.company-form-modal .company-profile-field-value select:focus,
+.company-form-modal .integration-field-value input:focus,
+.company-form-modal .detail-value input:focus,
+.company-form-modal .detail-value select:focus,
+.company-form-modal .detail-value textarea:focus {
+  border-color: #38bdf8;
+  outline: 2px solid rgba(56, 189, 248, 0.2);
+  outline-offset: 1px;
+}
+
+.company-form-modal input::placeholder,
+.company-form-modal textarea::placeholder {
+  color: #7f8eaa;
 }
 
 .company-logo-modal-upload-pane {

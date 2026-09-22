@@ -3263,7 +3263,7 @@ const compareQuestionOrder = (left, right) => {
 
                 <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column" }}>
                   {section.questions.map((qs, index) => {
-                    const conditionalCardBackgroundColor = "#eef4fb";
+                    const conditionalCardBackgroundColor = "#152a3d";
                     const isCurrentQuestionConditional = isFlowRuleSourceQuestion(
                       section.section_id,
                       qs.question.question_id
@@ -3409,12 +3409,14 @@ const compareQuestionOrder = (left, right) => {
                         padding: "12px 16px",
                         backgroundColor: isCurrentQuestionConditional
                           ? conditionalCardBackgroundColor
-                          : "#f9f9f9",
+                          : "#121c2e",
                         borderRadius: "8px",
-                        boxShadow:
-                          "0 2px 4px rgba(0,0,0,0.05)",
+                        boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                        border: "1px solid #253551",
                         borderLeft:
-                          "4px solid #007bff",
+                          isCurrentQuestionConditional
+                            ? "4px solid #14b8a6"
+                            : "4px solid #2563eb",
                         width: "100%",
                         display: "block",
                         marginBottom: "10px",
@@ -3481,7 +3483,7 @@ const compareQuestionOrder = (left, right) => {
                           )}
                           {renderCalculatedValuePill(qs, qs.question.title)}
                           {isCurrentQuestionConditional && (
-                            <span style={{ marginLeft: "10px", color: "#4b5563", fontWeight: 500 }}>
+                            <span style={{ marginLeft: "10px", color: "#98a6c3", fontWeight: 500 }}>
                               {currentFlowRuleCondition
                                 ? `(Conditional: ${currentFlowRuleCondition})`
                                 : "(Conditional)"}
@@ -3567,7 +3569,7 @@ const compareQuestionOrder = (left, right) => {
                         <div
                           style={{
                             fontSize: "0.85rem",
-                            color: "#555",
+                            color: "#cbd5e1",
                             marginTop: "4px",
                             marginLeft: "20px",
                           }}
@@ -3593,7 +3595,7 @@ const compareQuestionOrder = (left, right) => {
                         <div
                           style={{
                             fontSize: "0.85rem",
-                            color: "#555",
+                            color: "#cbd5e1",
                             marginTop: "4px",
                             marginLeft: "20px",
                           }}
@@ -3631,8 +3633,9 @@ const compareQuestionOrder = (left, right) => {
                               marginBottom: 0,
                               backgroundColor: conditionalCardBackgroundColor,
                               borderRadius: "8px",
-                              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                              borderLeft: "4px solid #93c5fd",
+                              boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                              border: "1px solid #2b4b5d",
+                              borderLeft: "4px solid #14b8a6",
                             }}
                           >
                             {shouldShowConditionalFalseArrow && conditionalCardIndexForRow >= 0 && (
@@ -3670,14 +3673,14 @@ const compareQuestionOrder = (left, right) => {
                                         position: "absolute",
                                         left: "-8.8235%",
                                         top: conditionalArrowLabelTop,
-                                        color: "#4b5563",
+                                        color: "#cbd5e1",
                                         fontSize: "0.8rem",
                                         fontWeight: 600,
                                         transform: "translate(-50%, -50%)",
                                         whiteSpace: "normal",
                                         lineHeight: 1.05,
                                         textAlign: "center",
-                                        backgroundColor: "#fff",
+                                        backgroundColor: "#17233a",
                                         padding: "1px 6px",
                                         borderRadius: "999px",
                                         zIndex: 2,
@@ -3701,7 +3704,7 @@ const compareQuestionOrder = (left, right) => {
                               <div style={{ minWidth: 0 }}>
                                 <div
                                   style={{
-                                    color: "#4b5563",
+                                    color: "#98a6c3",
                                     fontWeight: 500,
                                     fontSize: "0.72rem",
                                     whiteSpace: "nowrap",
@@ -3854,7 +3857,7 @@ const compareQuestionOrder = (left, right) => {
                               <div
                                 style={{
                                   fontSize: "0.85rem",
-                                  color: "#555",
+                                  color: "#cbd5e1",
                                   marginTop: "4px",
                                   marginLeft: "20px",
                                 }}
@@ -3879,7 +3882,7 @@ const compareQuestionOrder = (left, right) => {
                               <div
                                 style={{
                                   fontSize: "0.85rem",
-                                  color: "#555",
+                                  color: "#cbd5e1",
                                   marginTop: "4px",
                                   marginLeft: "20px",
                                 }}
@@ -3899,8 +3902,9 @@ const compareQuestionOrder = (left, right) => {
                             marginBottom: 0,
                             backgroundColor: conditionalCardBackgroundColor,
                             borderRadius: "8px",
-                            boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                            borderLeft: "4px solid #93c5fd",
+                            boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                            border: "1px solid #2b4b5d",
+                            borderLeft: "4px solid #14b8a6",
                             minHeight:
                               Math.max(
                                 72,
@@ -3948,14 +3952,14 @@ const compareQuestionOrder = (left, right) => {
                                       position: "absolute",
                                       left: "-8.8235%",
                                       top: conditionalArrowLabelTop,
-                                      color: "#4b5563",
+                                      color: "#cbd5e1",
                                       fontSize: "0.8rem",
                                       fontWeight: 600,
                                       transform: "translate(-50%, -50%)",
                                       whiteSpace: "normal",
                                       lineHeight: 1.05,
                                       textAlign: "center",
-                                      backgroundColor: "#fff",
+                                      backgroundColor: "#17233a",
                                       padding: "1px 6px",
                                       borderRadius: "999px",
                                       zIndex: 2,
@@ -3971,7 +3975,7 @@ const compareQuestionOrder = (left, right) => {
                           )}
                           <div
                             style={{
-                              color: "#4b5563",
+                              color: "#98a6c3",
                               fontSize: "0.72rem",
                               fontWeight: 500,
                               lineHeight: 1.1,
@@ -4072,10 +4076,11 @@ const compareQuestionOrder = (left, right) => {
                           style={{
                             position: "relative",
                             padding: "4px 16px 9px 16px",
-                            backgroundColor: "#eef4fb",
+                            backgroundColor: "#152a3d",
                             borderRadius: "8px",
-                            boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                            borderLeft: "4px solid #93c5fd",
+                            boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                            border: "1px solid #2b4b5d",
+                            borderLeft: "4px solid #14b8a6",
                           }}
                         >
                           {shouldShowConditionalFalseArrow && (
@@ -4095,14 +4100,14 @@ const compareQuestionOrder = (left, right) => {
                                     position: "absolute",
                                     left: "-8.8235%",
                                     top: conditionalArrowLabelTop,
-                                    color: "#4b5563",
+                                    color: "#cbd5e1",
                                     fontSize: "0.8rem",
                                     fontWeight: 600,
                                     transform: "translate(-50%, -50%)",
                                     whiteSpace: "normal",
                                     lineHeight: 1.05,
                                     textAlign: "center",
-                                    backgroundColor: "#fff",
+                                    backgroundColor: "#17233a",
                                     padding: "1px 6px",
                                     borderRadius: "999px",
                                     zIndex: 2,
@@ -4125,7 +4130,7 @@ const compareQuestionOrder = (left, right) => {
                             <div style={{ minWidth: 0 }}>
                               <div
                                 style={{
-                                  color: "#4b5563",
+                                  color: "#98a6c3",
                                   fontWeight: 500,
                                   fontSize: "0.72rem",
                                   whiteSpace: "nowrap",
@@ -4279,7 +4284,7 @@ const compareQuestionOrder = (left, right) => {
                             <div
                               style={{
                                 fontSize: "0.85rem",
-                                color: "#555",
+                                color: "#cbd5e1",
                                 marginTop: "4px",
                                 marginLeft: "20px",
                               }}
@@ -4304,7 +4309,7 @@ const compareQuestionOrder = (left, right) => {
                             <div
                               style={{
                                 fontSize: "0.85rem",
-                                color: "#555",
+                                color: "#cbd5e1",
                                 marginTop: "4px",
                                 marginLeft: "20px",
                               }}
@@ -4347,10 +4352,11 @@ const compareQuestionOrder = (left, right) => {
                           style={{
                             position: "relative",
                             padding: "4px 16px 9px 16px",
-                            backgroundColor: "#eef4fb",
+                            backgroundColor: "#152a3d",
                             borderRadius: "8px",
-                            boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                            borderLeft: "4px solid #93c5fd",
+                            boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                            border: "1px solid #2b4b5d",
+                            borderLeft: "4px solid #14b8a6",
                             minHeight: 90,
                             display: "flex",
                             flexDirection: "column",
@@ -4387,14 +4393,14 @@ const compareQuestionOrder = (left, right) => {
                                     position: "absolute",
                                     left: "-8.8235%",
                                     top: "50%",
-                                    color: "#4b5563",
+                                    color: "#cbd5e1",
                                     fontSize: "0.8rem",
                                     fontWeight: 600,
                                     transform: "translate(-50%, -50%)",
                                     whiteSpace: "normal",
                                     lineHeight: 1.05,
                                     textAlign: "center",
-                                    backgroundColor: "#fff",
+                                    backgroundColor: "#17233a",
                                     padding: "1px 6px",
                                     borderRadius: "999px",
                                     zIndex: 2,
@@ -4409,7 +4415,7 @@ const compareQuestionOrder = (left, right) => {
                           )}
                           <div
                             style={{
-                              color: "#4b5563",
+                              color: "#98a6c3",
                               fontSize: "0.72rem",
                               fontWeight: 500,
                               lineHeight: 1.1,

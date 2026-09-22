@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { FaListAlt, FaSyncAlt, FaTrash } from "react-icons/fa";
+import { FaChevronDown, FaChevronRight, FaListAlt, FaSyncAlt, FaTrash } from "react-icons/fa";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import CognitrackXInvoice from "./CognitrackXInvoice";
@@ -26,6 +26,9 @@ const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-atte
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const PATIENT_ASSESSMENT_LOGS_API = `${API_BASE}/api/patient-assessment-logs`;
+const PATIENT_DOCUMENTS_API = `${API_BASE}/api/patient-documents/`;
+const DOCUMENT_TYPES_API = `${API_BASE}/api/document-types`;
+const DOCUMENT_UPLOAD_GET_LINK_API = `${API_BASE}/api/document-upload/get-link/`;
 const DOCUMENT_DOWNLOAD_GET_LINK_API = `${API_BASE}/api/document-download/get-link/`;
 const PATIENT_TOKENS_CREATE_API = `${API_BASE}/api/patient-tokens/create/`;
 const PATIENT_TOKENS_ROTATE_API = `${API_BASE}/api/patient-tokens/rotate/`;
@@ -429,6 +432,126 @@ const getPdfPaginationHints = (rootElement) => {
       .filter((value) => Number.isFinite(value) && value > 0)
       .sort((left, right) => left - right),
   };
+};
+
+const createPdfBlobFromHtml = async (html) => {
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-10000px";
+  iframe.style.top = "0";
+  iframe.style.width = "1024px";
+  iframe.style.height = "1px";
+  iframe.style.border = "0";
+  iframe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(iframe);
+
+  try {
+    await new Promise((resolve, reject) => {
+      iframe.onload = resolve;
+      iframe.onerror = () => reject(new Error("Failed to render generated report HTML."));
+      iframe.srcdoc = html;
+    });
+
+    const reportDocument = iframe.contentDocument;
+    const reportElement = reportDocument?.body?.firstElementChild ?? reportDocument?.body;
+    if (!reportElement) {
+      throw new Error("Generated report HTML did not render any content.");
+    }
+
+    await reportDocument.fonts?.ready;
+    await Promise.all(Array.from(reportDocument.images || []).map((image) => {
+      if (image.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        image.addEventListener("load", resolve, { once: true });
+        image.addEventListener("error", resolve, { once: true });
+      });
+    }));
+
+    const captureWidth = Math.ceil(Math.max(reportElement.scrollWidth, reportElement.clientWidth, 1));
+    const captureHeight = Math.ceil(Math.max(reportElement.scrollHeight, reportElement.clientHeight, 1));
+    iframe.style.height = `${captureHeight}px`;
+    const pageBackgroundRgb = getPdfPageBackgroundRgb(reportElement);
+    const reportBackgroundColor = `rgb(${pageBackgroundRgb.r}, ${pageBackgroundRgb.g}, ${pageBackgroundRgb.b})`;
+    const backgroundLuminance =
+      0.2126 * pageBackgroundRgb.r +
+      0.7152 * pageBackgroundRgb.g +
+      0.0722 * pageBackgroundRgb.b;
+    const footerTextRgb = backgroundLuminance < 145
+      ? { r: 203, g: 213, b: 225 }
+      : { r: 71, g: 85, b: 105 };
+
+    const canvas = await html2canvas(reportElement, {
+      scale: 1.5,
+      useCORS: true,
+      backgroundColor: reportBackgroundColor,
+      logging: false,
+      width: captureWidth,
+      height: captureHeight,
+      windowWidth: captureWidth,
+      windowHeight: captureHeight,
+    });
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 12.7;
+    const contentWidth = pageWidth - margin * 2;
+    const contentHeight = pageHeight - margin * 2;
+    const pageHeightPx = Math.floor((canvas.width * contentHeight) / contentWidth);
+    const totalPages = Math.ceil(canvas.height / pageHeightPx);
+    const footerDisclaimer = "This report contains patient self-reported symptom data only. It does not constitute a medical diagnosis or treatment recommendation. All data submitted for licensed physician review.";
+
+    for (let pageTop = 0, pageIndex = 0; pageTop < canvas.height; pageTop += pageHeightPx, pageIndex += 1) {
+      const sliceHeight = Math.min(pageHeightPx, canvas.height - pageTop);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const pageContext = pageCanvas.getContext("2d");
+      if (!pageContext) throw new Error("Failed to create PDF page canvas.");
+
+      pageContext.fillStyle = reportBackgroundColor;
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(
+        canvas,
+        0,
+        pageTop,
+        canvas.width,
+        sliceHeight,
+        0,
+        0,
+        canvas.width,
+        sliceHeight
+      );
+
+      if (pageIndex > 0) pdf.addPage();
+  pdf.setFillColor(pageBackgroundRgb.r, pageBackgroundRgb.g, pageBackgroundRgb.b);
+  pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      pdf.addImage(
+        pageCanvas.toDataURL("image/jpeg", 0.92),
+        "JPEG",
+        margin,
+        margin,
+        contentWidth,
+        (sliceHeight / canvas.width) * contentWidth
+      );
+
+      pdf.setTextColor(footerTextRgb.r, footerTextRgb.g, footerTextRgb.b);
+      pdf.setFontSize(5.5);
+      const footerLines = pdf.splitTextToSize(footerDisclaimer, contentWidth);
+      pdf.text(footerLines, pageWidth / 2, pageHeight - margin + 1, {
+        align: "center",
+        baseline: "top",
+      });
+      pdf.setFontSize(6);
+      pdf.text(`Page ${pageIndex + 1} of ${totalPages}`, pageWidth / 2, pageHeight - 3.2, {
+        align: "center",
+      });
+    }
+
+    return pdf.output("blob");
+  } finally {
+    iframe.remove();
+  }
 };
 
 const getPhoneRowKey = (phone) =>
@@ -1039,6 +1162,9 @@ const Patients = () => {
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [modalMode, setModalMode] = useState(null); // "view" | "edit"
   const [assessmentPatient, setAssessmentPatient] = useState(null);
+  const [patientTableScrollWidth, setPatientTableScrollWidth] = useState(0);
+  const patientTableTopScrollRef = useRef(null);
+  const patientTableShellRef = useRef(null);
 
   const userTypeId = getUserTypeId(user);
   const selectedCompany = getSelectedCompany();
@@ -1050,34 +1176,63 @@ const Patients = () => {
   const isCorporateAdmin = userTypeId === 3;
   const isCompanyRestrictedUser = userTypeId === 1 || userTypeId === 2;
 
-  useEffect(() => {
-    const loadPatients = async () => {
-      setLoading(true);
-      try {
-        const withSlashRes = await apiRequest(PATIENTS_VIEW_API_URL);
-        if (withSlashRes.ok) {
-          const data = await withSlashRes.json();
-          setPatients(Array.isArray(data) ? data : []);
-          return;
-        }
-
-        const noSlashRes = await apiRequest(PATIENTS_VIEW_API_URL.replace(/\/$/, ""));
-        if (!noSlashRes.ok) {
-          throw new Error(`Patients view request failed (${noSlashRes.status})`);
-        }
-
-        const fallbackData = await noSlashRes.json();
-        setPatients(Array.isArray(fallbackData) ? fallbackData : []);
-      } catch (error) {
-        console.error("Failed to load patients view", error);
-        setPatients([]);
-      } finally {
-        setLoading(false);
+  const loadPatients = useCallback(async () => {
+    setLoading(true);
+    try {
+      const withSlashRes = await apiRequest(PATIENTS_VIEW_API_URL);
+      if (withSlashRes.ok) {
+        const data = await withSlashRes.json();
+        setPatients(Array.isArray(data) ? data : []);
+        return;
       }
+
+      const noSlashRes = await apiRequest(PATIENTS_VIEW_API_URL.replace(/\/$/, ""));
+      if (!noSlashRes.ok) {
+        throw new Error(`Patients view request failed (${noSlashRes.status})`);
+      }
+
+      const fallbackData = await noSlashRes.json();
+      setPatients(Array.isArray(fallbackData) ? fallbackData : []);
+    } catch (error) {
+      console.error("Failed to load patients view", error);
+      setPatients([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPatients();
+  }, [loadPatients]);
+
+  useEffect(() => {
+    const tableShell = patientTableShellRef.current;
+    if (!tableShell) return undefined;
+
+    const updateScrollWidth = () => {
+      setPatientTableScrollWidth(tableShell.scrollWidth);
     };
 
-    loadPatients();
+    updateScrollWidth();
+    const resizeObserver = new ResizeObserver(updateScrollWidth);
+    resizeObserver.observe(tableShell);
+    const table = tableShell.querySelector("table");
+    if (table) resizeObserver.observe(table);
+
+    return () => resizeObserver.disconnect();
   }, []);
+
+  const syncPatientTableFromTop = (event) => {
+    if (patientTableShellRef.current) {
+      patientTableShellRef.current.scrollLeft = event.currentTarget.scrollLeft;
+    }
+  };
+
+  const syncPatientTableFromBottom = (event) => {
+    if (patientTableTopScrollRef.current) {
+      patientTableTopScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+    }
+  };
 
   useEffect(() => {
     if (!isCorporateAdmin) {
@@ -1272,50 +1427,88 @@ const Patients = () => {
 
   return (
     <div className="patients-page">
-      <h1>
-        {patientLabels.plural}
-        <span className="patients-page-count">{sortedPatients.length}</span>
-      </h1>
-        <div className="patients-toolbar">
+      <header className="portal-page-header">
+        <div>
+          <p className="portal-page-kicker">Patient operations</p>
+          <h1 className="portal-page-title">
+            {patientLabels.plural}
+            <span className="portal-page-count">{sortedPatients.length}</span>
+          </h1>
+          <p className="portal-page-subtitle">Manage patient records and assessment activity.</p>
+        </div>
+        <div className="portal-page-actions">
+          <button
+            className="assessments-action-btn portal-primary-action"
+            onClick={() => {
+              setSelectedPatient(null);
+              setModalMode("add");
+            }}
+          >
+            + Add New {patientLabels.singular}
+          </button>
+        </div>
+      </header>
+
+        <div className="patients-toolbar portal-command-bar">
+          <label className="portal-search-field" htmlFor="patients-search">
+            <span>Search</span>
             <input
-                className="search-bar"
+                id="patients-search"
+                className="search-bar portal-search-input"
                 placeholder={`Search ${patientLabels.pluralLower}...`}
+                aria-label={`Search ${patientLabels.pluralLower}`}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
             />
+          </label>
             {isCorporateAdmin && (
-              <label className="patients-company-filter">
-                <span>Company</span>
-                <select
-                  value={companyFilterId}
-                  onChange={(event) => setCompanyFilterId(event.target.value)}
+              <div className="patients-company-filter-group">
+                <label className="patients-company-filter">
+                  <span>Filter by Company</span>
+                  <select
+                    value={companyFilterId}
+                    onChange={(event) => setCompanyFilterId(event.target.value)}
+                  >
+                    <option value="">All</option>
+                    {companyFilterOptions.map((company) => {
+                      const companyId = company?.company_id ?? company?.id;
+                      return (
+                        <option key={companyId} value={companyId}>
+                          {company?.company_name ?? company?.name ?? `Company ${companyId}`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="patients-refresh-btn"
+                  onClick={loadPatients}
+                  disabled={loading}
+                  aria-label={`Refresh ${patientLabels.pluralLower}`}
+                  title={`Refresh ${patientLabels.pluralLower}`}
                 >
-                  <option value="">All</option>
-                  {companyFilterOptions.map((company) => {
-                    const companyId = company?.company_id ?? company?.id;
-                    return (
-                      <option key={companyId} value={companyId}>
-                        {company?.company_name ?? company?.name ?? `Company ${companyId}`}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
+                  <FaSyncAlt className={loading ? "spin" : ""} aria-hidden="true" />
+                </button>
+              </div>
             )}
         </div>
-        <div className="patients-actions">
-            <button
-              className="assessments-action-btn"
-                style={{ marginBottom: "12px", fontSize: "0.95rem" }}
-                onClick={() => {
-                    setSelectedPatient(null);
-                    setModalMode("add");
-                }}
-                >
-                    + Add New {patientLabels.singular}
-            </button>
-        </div>
 
+      <div
+        ref={patientTableTopScrollRef}
+        className="patients-table-top-scroll"
+        onScroll={syncPatientTableFromTop}
+        role="region"
+        aria-label={`Scroll ${patientLabels.pluralLower} table horizontally`}
+        tabIndex={0}
+      >
+        <div style={{ width: patientTableScrollWidth, height: 1 }} aria-hidden="true" />
+      </div>
+      <div
+        ref={patientTableShellRef}
+        className="portal-table-shell"
+        onScroll={syncPatientTableFromBottom}
+      >
       <table className="patients-table">
         <thead>
           <tr>
@@ -1428,7 +1621,22 @@ const Patients = () => {
                   <td>{formatLatestAssessmentCodename(p.latest_assessment_codename)}</td>
                   <td>
                     {latestAssessmentStatus ? (
-                      <span className={`latest-assessment-status-pill ${latestAssessmentStatus.className}`}>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className={`latest-assessment-status-pill ${latestAssessmentStatus.className}`}
+                        title="Open assessments"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAssessmentPatient(p);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setAssessmentPatient(p);
+                        }}
+                      >
                         {latestAssessmentStatus.label}
                       </span>
                     ) : (
@@ -1463,6 +1671,7 @@ const Patients = () => {
           )}
         </tbody>
       </table>
+      </div>
 
       {modalMode && (
         modalMode === "add" ? (
@@ -5203,6 +5412,8 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
   const [selectedReportFields, setSelectedReportFields] = useState(null);
   const [selectedReportHtml, setSelectedReportHtml] = useState("");
+  const [selectedReportDocumentUrl, setSelectedReportDocumentUrl] = useState("");
+  const [selectedReportDocumentName, setSelectedReportDocumentName] = useState("");
   const [loadingGeneratedPreview, setLoadingGeneratedPreview] = useState(null);
   const [selectedGeneratedPreviewType, setSelectedGeneratedPreviewType] = useState("report");
   const [isDownloadingGeneratedReport, setIsDownloadingGeneratedReport] = useState(false);
@@ -5236,12 +5447,51 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
   const handleDownloadGeneratedReportPdf = useCallback(async () => {
     const isInvoicePreview = selectedGeneratedPreviewType === "invoice";
+    const isStoredReportPreview = selectedGeneratedPreviewType === "stored-report";
+
+    if (isDownloadingGeneratedReport) return;
+
+    if (isStoredReportPreview && selectedReportDocumentUrl) {
+      setIsDownloadingGeneratedReport(true);
+
+      try {
+        const response = await fetch(selectedReportDocumentUrl);
+        if (!response.ok) {
+          throw new Error(`Stored report download failed (${response.status}).`);
+        }
+
+        const reportBlob = await response.blob();
+        const blobUrl = URL.createObjectURL(reportBlob);
+        const downloadLink = document.createElement("a");
+        downloadLink.href = blobUrl;
+        downloadLink.download = selectedReportDocumentName || "assessment-report.pdf";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+        URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        console.error("Failed to download stored report PDF", error);
+        const downloadLink = document.createElement("a");
+        downloadLink.href = selectedReportDocumentUrl;
+        downloadLink.target = "_blank";
+        downloadLink.rel = "noopener noreferrer";
+        downloadLink.download = selectedReportDocumentName || "assessment-report.pdf";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+      } finally {
+        setIsDownloadingGeneratedReport(false);
+      }
+
+      return;
+    }
+
     const reportDocument = generatedReportIframeRef.current?.contentDocument;
     const reportElement = isInvoicePreview
       ? generatedReportRef.current
       : reportDocument?.body?.firstElementChild ?? reportDocument?.body;
 
-    if (!reportElement || isDownloadingGeneratedReport) return;
+    if (!reportElement) return;
 
     setIsDownloadingGeneratedReport(true);
 
@@ -5486,6 +5736,8 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     patient?.last_name,
     selectedGeneratedPreviewType,
     selectedReportAttempt,
+    selectedReportDocumentName,
+    selectedReportDocumentUrl,
   ]);
 
   const sendAssessmentLinkEmail = useCallback(async ({ recipientEmail, assessmentLink }) => {
@@ -5913,6 +6165,18 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     return found?.name ?? `Assessment #${assessmentId || "—"}`;
   }, [assessments]);
 
+  const getAssessmentCodename = useCallback((attempt) => {
+    const attemptCodename =
+      attempt?.assessment?.codename ??
+      attempt?.assessment_codename ??
+      attempt?.codename;
+    if (attemptCodename) return String(attemptCodename).trim();
+
+    const assessmentId = getAttemptAssessmentId(attempt);
+    const found = assessments.find((assessment) => Number(assessment?.assessment_id) === assessmentId);
+    return String(found?.codename ?? "").trim();
+  }, [assessments]);
+
   const getAttemptFeedbackKey = (attempt) => {
     const attemptId = getAttemptId(attempt);
     const assessmentId = getAttemptAssessmentId(attempt);
@@ -5995,25 +6259,31 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       const isExpanded = expandedAttemptLogRows.has(rowKey);
 
       return (
-        <button
-          type="button"
+        <div
           className={`assessment-log-response-toggle ${isExpanded ? "is-expanded" : ""}`}
-          aria-expanded={isExpanded}
-          title={isExpanded ? "Collapse response" : "Expand response"}
-          onClick={() => {
-            setExpandedAttemptLogRows((previousRows) => {
-              const nextRows = new Set(previousRows);
-              if (nextRows.has(rowKey)) {
-                nextRows.delete(rowKey);
-              } else {
-                nextRows.add(rowKey);
-              }
-              return nextRows;
-            });
-          }}
         >
+          <button
+            type="button"
+            className="assessment-log-response-expand-btn"
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? "Collapse response" : "Expand response"}
+            title={isExpanded ? "Collapse response" : "Expand response"}
+            onClick={() => {
+              setExpandedAttemptLogRows((previousRows) => {
+                const nextRows = new Set(previousRows);
+                if (nextRows.has(rowKey)) {
+                  nextRows.delete(rowKey);
+                } else {
+                  nextRows.add(rowKey);
+                }
+                return nextRows;
+              });
+            }}
+          >
+            {isExpanded ? <FaChevronDown /> : <FaChevronRight />}
+          </button>
           <pre className="assessment-log-json">{responseText}</pre>
-        </button>
+        </div>
       );
     }
 
@@ -6795,6 +7065,67 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     };
 
     try {
+      const assessmentCodename = getAssessmentCodename(attempt).toLowerCase();
+      const expectedDocumentType = assessmentCodename ? `${assessmentCodename}_report` : "";
+      const documentsResponse = await apiRequest(
+        `${PATIENT_DOCUMENTS_API}?assessment_attempt=${encodeURIComponent(attemptId)}`
+      );
+
+      if (!documentsResponse.ok) {
+        const errorMessage = await getResponseErrorMessage(documentsResponse);
+        throw new Error(`Patient documents request failed: ${errorMessage}`);
+      }
+
+      const matchingDocuments = normalizeApiRows(await documentsResponse.json())
+        .filter((document) => (
+          expectedDocumentType &&
+          String(document?.document_type?.description ?? "").trim().toLowerCase() === expectedDocumentType
+        ))
+        .sort((left, right) => {
+          const dateDifference =
+            (new Date(right?.created_date).getTime() || 0) -
+            (new Date(left?.created_date).getTime() || 0);
+          if (dateDifference !== 0) return dateDifference;
+          return Number(right?.patient_document_id ?? 0) - Number(left?.patient_document_id ?? 0);
+        });
+
+      const latestReportDocument = matchingDocuments[0];
+      const patientDocumentId = Number(latestReportDocument?.patient_document_id ?? 0);
+
+      if (patientDocumentId > 0) {
+        let documentLinkResponse = await apiRequest(
+          `${DOCUMENT_DOWNLOAD_GET_LINK_API}${patientDocumentId}/`
+        );
+        if (!documentLinkResponse.ok && documentLinkResponse.status === 404) {
+          documentLinkResponse = await apiRequest(
+            `${DOCUMENT_DOWNLOAD_GET_LINK_API}${patientDocumentId}`
+          );
+        }
+
+        if (!documentLinkResponse.ok) {
+          const errorMessage = await getResponseErrorMessage(documentLinkResponse);
+          throw new Error(`Document download link request failed: ${errorMessage}`);
+        }
+
+        const documentLinkPayload = await documentLinkResponse.json().catch(() => null);
+        const documentUrl = String(documentLinkPayload?.document_url ?? "").trim();
+        if (!documentUrl) {
+          throw new Error("Document download response did not include document_url.");
+        }
+
+        const locationPath = String(latestReportDocument?.location ?? "").split("?")[0];
+        const documentName = decodeURIComponent(locationPath.split("/").pop() || "assessment-report.pdf");
+
+        setSelectedGeneratedPreviewType("stored-report");
+        setSelectedReportAttempt(attempt);
+        setSelectedReportFields(reportFields);
+        setSelectedReportHtml("");
+        setSelectedReportDocumentUrl(documentUrl);
+        setSelectedReportDocumentName(documentName);
+        setShowGeneratedReportModal(true);
+        return;
+      }
+
       const reportResponse = await apiRequest(COGNITRACKX_REPORT_HTML_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6815,10 +7146,117 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         throw new Error("Report response did not include html.");
       }
 
-      setSelectedGeneratedPreviewType("report");
+      const pdfBlob = await createPdfBlobFromHtml(reportHtml);
+      let documentTypeId = 2;
+
+      try {
+        const documentTypesResponse = await apiRequest(
+          `${DOCUMENT_TYPES_API}?search=${encodeURIComponent(expectedDocumentType)}`
+        );
+        if (documentTypesResponse.ok) {
+          const matchingDocumentType = normalizeApiRows(await documentTypesResponse.json())
+            .find((documentType) => (
+              String(documentType?.description ?? "").trim().toLowerCase() === expectedDocumentType
+            ));
+          documentTypeId = Number(matchingDocumentType?.document_type_id ?? 0) || 2;
+        }
+      } catch {
+        documentTypeId = 2;
+      }
+
+      const resolvedPatientId = Number(
+        patient?.patient_id ?? attempt?.patient_id ?? attempt?.patient?.patient_id ?? 0
+      );
+      const resolvedCompanyId = Number(
+        attempt?.company_id ??
+        attempt?.company?.company_id ??
+        patient?.companies?.[0]?.company?.company_id ??
+        patient?.companies?.[0]?.company_id ??
+        primaryCompanyId ??
+        0
+      );
+      const completedDate = new Date(
+        attempt?.completed_date ??
+        attempt?.completed_at ??
+        attempt?.completedAt ??
+        attempt?.completed_on ??
+        attempt?.updated_at ??
+        Date.now()
+      );
+      const validCompletedDate = Number.isNaN(completedDate.getTime()) ? new Date() : completedDate;
+      const completedDateText = [
+        String(validCompletedDate.getMonth() + 1).padStart(2, "0"),
+        String(validCompletedDate.getDate()).padStart(2, "0"),
+        validCompletedDate.getFullYear(),
+      ].join("-");
+      const sanitizeFilenamePart = (value, fallback) => (
+        String(value ?? "")
+          .trim()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-zA-Z0-9_-]/g, "") || fallback
+      );
+      const documentName = `${sanitizeFilenamePart(assessmentCodename, "assessment")}-report-${sanitizeFilenamePart(patient?.first_name, "patient")}-${sanitizeFilenamePart(patient?.last_name, "report")}-${completedDateText}.pdf`;
+
+      const uploadLinkResponse = await apiRequest(DOCUMENT_UPLOAD_GET_LINK_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_id: resolvedPatientId,
+          company_id: resolvedCompanyId,
+          document_type: documentTypeId,
+          assessment_attempt_id: attemptId,
+          document_name: documentName,
+        }),
+      });
+
+      if (!uploadLinkResponse.ok) {
+        const errorMessage = await getResponseErrorMessage(uploadLinkResponse);
+        throw new Error(`Document upload link request failed: ${errorMessage}`);
+      }
+
+      const uploadLinkPayload = await uploadLinkResponse.json().catch(() => null);
+      const uploadUrl = String(uploadLinkPayload?.upload_url ?? "").trim();
+      const uploadedPatientDocumentId = Number(uploadLinkPayload?.patient_document_id ?? 0);
+      if (!uploadUrl || uploadedPatientDocumentId <= 0) {
+        throw new Error("Document upload response did not include upload_url or patient_document_id.");
+      }
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: pdfBlob,
+      });
+      if (!uploadResponse.ok) {
+        const uploadError = await uploadResponse.text().catch(() => "");
+        throw new Error(`Report PDF upload failed (${uploadResponse.status}) ${uploadError}`);
+      }
+
+      let documentLinkResponse = await apiRequest(
+        `${DOCUMENT_DOWNLOAD_GET_LINK_API}${uploadedPatientDocumentId}/`
+      );
+      if (!documentLinkResponse.ok && documentLinkResponse.status === 404) {
+        documentLinkResponse = await apiRequest(
+          `${DOCUMENT_DOWNLOAD_GET_LINK_API}${uploadedPatientDocumentId}`
+        );
+      }
+
+      if (!documentLinkResponse.ok) {
+        const errorMessage = await getResponseErrorMessage(documentLinkResponse);
+        throw new Error(`Document download link request failed: ${errorMessage}`);
+      }
+
+      const documentLinkPayload = await documentLinkResponse.json().catch(() => null);
+      const documentUrl = String(documentLinkPayload?.document_url ?? "").trim();
+      if (!documentUrl) {
+        throw new Error("Document download response did not include document_url.");
+      }
+
+      setSelectedGeneratedPreviewType("stored-report");
       setSelectedReportAttempt(attempt);
       setSelectedReportFields(reportFields);
-      setSelectedReportHtml(reportHtml);
+      setSelectedReportHtml("");
+      setSelectedReportDocumentUrl(documentUrl);
+      setSelectedReportDocumentName(documentName);
       setShowGeneratedReportModal(true);
     } catch (error) {
       console.error("Failed to load generated report HTML", error);
@@ -6855,6 +7293,8 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       setSelectedReportAttempt(attempt);
       setSelectedReportFields(invoiceFields);
       setSelectedReportHtml("");
+      setSelectedReportDocumentUrl("");
+      setSelectedReportDocumentName("");
       setShowGeneratedReportModal(true);
     } finally {
       setLoadingGeneratedPreview(null);
@@ -7192,8 +7632,8 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               >
                                 {loadingGeneratedPreview?.attemptId === attemptId &&
                                 loadingGeneratedPreview?.type === "report"
-                                  ? "Generating..."
-                                  : "Generate Report"}
+                                  ? "Loading..."
+                                  : "Show Report"}
                               </button>
                             )}
                             {userTypeId === 3 && (
@@ -7330,6 +7770,8 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                       setSelectedReportAttempt(null);
                       setSelectedReportFields(null);
                       setSelectedReportHtml("");
+                      setSelectedReportDocumentUrl("");
+                      setSelectedReportDocumentName("");
                       setSelectedGeneratedPreviewType("report");
                     }}
                     style={{
@@ -7362,6 +7804,18 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                       companyName={selectedReportFields?.companyName}
                       invoiceNumber={selectedReportFields?.invoiceNumber}
                       assessmentDate={selectedReportFields?.assessmentDate}
+                    />
+                  ) : selectedGeneratedPreviewType === "stored-report" ? (
+                    <iframe
+                      title="Stored report preview"
+                      src={selectedReportDocumentUrl}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        minHeight: "calc(92vh - 120px)",
+                        border: 0,
+                        background: "#ffffff",
+                      }}
                     />
                   ) : (
                     <iframe
@@ -7487,7 +7941,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
             <div className="modal modern assessment-logs-modal">
               <div className="modal-header">
                 <div>
-                  <h3>Assessment Logs</h3>
+                  <h3>Assessment Attempt Logs</h3>
                   <div className="assessment-logs-subtitle">
                     {`${getAssessmentName(selectedLogsAttempt)} - Attempt ${getAttemptId(selectedLogsAttempt) ?? "—"}`}
                   </div>

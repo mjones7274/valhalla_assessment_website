@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import * as FaIcons from "react-icons/fa";
 import * as AiIcons from "react-icons/ai";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { SidebarData } from "./SidebarData";
 import "../App.css";
 import { IconContext } from "react-icons";
@@ -15,7 +15,8 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
   const [sidebar, setSidebar] = useState(false);
   const navigate = useNavigate();
 
-  const showSidebar = () => setSidebar(!sidebar);
+  const showSidebar = () => setSidebar((isOpen) => !isOpen);
+  const closeSidebar = () => setSidebar(false);
 
   const handleSignOut = () => {
     logout();
@@ -38,7 +39,7 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
     return false;
   });
 
-  const itemsToShow = loggedIn
+  const mobileItems = loggedIn
     ? [
         ...filteredSidebarData,
         {
@@ -50,52 +51,40 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
         },
       ]
     : [
-        { title: "Login", path: "/login", icon: <AiIcons.AiOutlineLogin />, cName: "nav-text" },
+        { title: "Sign in", path: "/login", icon: <AiIcons.AiOutlineLogin />, cName: "nav-text" },
       ];
 
-  const topNavItems = [...itemsToShow];
-  const usersIndex = topNavItems.findIndex((item) => item.path === "/users");
-  const companiesIndex = topNavItems.findIndex((item) => item.path === "/companies");
-  if (usersIndex !== -1 && companiesIndex !== -1) {
-    [topNavItems[usersIndex], topNavItems[companiesIndex]] = [
-      topNavItems[companiesIndex],
-      topNavItems[usersIndex],
-    ];
-  }
+  const topNavItems = loggedIn
+    ? filteredSidebarData
+    : mobileItems;
+  const userInitials = [user?.first_name, user?.last_name]
+    .filter(Boolean)
+    .map((name) => name.charAt(0).toUpperCase())
+    .join("")
+    .slice(0, 2);
 
   return (
     <IconContext.Provider value={{ color: "undefined" }}>
       <div className="navbar">
-        <Link
-          to="#"
+        <button
+          type="button"
           className={`menu-bars menu-bars-trigger ${loggedIn ? "is-auth" : "is-guest"}`}
           aria-label="Open navigation menu"
+          aria-expanded={sidebar}
+          aria-controls="mobile-navigation"
+          onClick={showSidebar}
         >
-          <FaIcons.FaBars onClick={showSidebar} />
-        </Link>
+          <FaIcons.FaBars />
+        </button>
 
         {loggedIn && Boolean(selectedCompany?.api_test_mode) && (
           <span className="api-test-mode-pill api-test-mode-pill-mobile">API Test Mode</span>
         )}
 
-        <div className="top-nav-links" aria-label="Primary Navigation">
+        <nav className="top-nav-links" aria-label="Primary navigation">
           <div className="top-nav-links-left">
             {topNavItems.map((item, index) => {
               const label = replacePatientText(item.title, useClientTerminology);
-
-              if (item.onClick) {
-                return (
-                  <button
-                    key={`${item.title}-${index}`}
-                    type="button"
-                    className="top-nav-link top-nav-action"
-                    onClick={item.onClick}
-                  >
-                    {item.icon}
-                    <span>{label}</span>
-                  </button>
-                );
-              }
 
               return (
                 <NavLink
@@ -118,26 +107,72 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
                 <span className="api-test-mode-pill">API Test Mode</span>
               )}
               <div className="header-account-pill" title={`${user.first_name} ${user.last_name}`}>
-                <span className="header-account-name">{user.first_name} {user.last_name}</span>
-                {headerAccountLabel && <span className="header-account-role">{headerAccountLabel}</span>}
+                <span className="header-account-avatar" aria-hidden="true">{userInitials}</span>
+                <span className="header-account-copy">
+                  <span className="header-account-name">{user.first_name} {user.last_name}</span>
+                  {headerAccountLabel && <span className="header-account-role">{headerAccountLabel}</span>}
+                </span>
               </div>
+              <button
+                type="button"
+                className="top-nav-action"
+                onClick={handleSignOut}
+                title="Sign out"
+                aria-label="Sign out"
+              >
+                <AiIcons.AiOutlineLogout />
+              </button>
             </div>
           )}
-        </div>
+        </nav>
       </div>
-      <nav className={sidebar ? "nav-menu active" : "nav-menu"}>
-        <ul className="nav-menu-items" onClick={showSidebar}>
-          <li className="navbar-toggle">
-            <Link to="#" className="menu-bars">
-              <AiIcons.AiOutlineClose />
-            </Link>
-          </li>
-          {itemsToShow.map((item, index) => (
-            <li key={index} className={item.cName}>
-              <Link to={item.path} onClick={item.onClick ? item.onClick : null}>
-                {item.icon}
-                <span>{replacePatientText(item.title, useClientTerminology)}</span>
-              </Link>
+      <button
+        type="button"
+        className={sidebar ? "nav-menu-backdrop active" : "nav-menu-backdrop"}
+        onClick={closeSidebar}
+        aria-label="Close navigation menu"
+        tabIndex={sidebar ? 0 : -1}
+      />
+      <nav
+        id="mobile-navigation"
+        className={sidebar ? "nav-menu active" : "nav-menu"}
+        aria-label="Mobile navigation"
+        aria-hidden={!sidebar}
+      >
+        <div className="mobile-nav-header">
+          <img src={`${process.env.PUBLIC_URL}/favicon.ico`} alt="" />
+          <span>Valhalla Assessments</span>
+          <button type="button" className="mobile-nav-close" onClick={closeSidebar} aria-label="Close navigation menu">
+            <AiIcons.AiOutlineClose />
+          </button>
+        </div>
+        {loggedIn && user && (
+          <div className="mobile-nav-account">
+            <span className="header-account-avatar" aria-hidden="true">{userInitials}</span>
+            <span className="header-account-copy">
+              <span className="header-account-name">{user.first_name} {user.last_name}</span>
+              {headerAccountLabel && <span className="header-account-role">{headerAccountLabel}</span>}
+            </span>
+          </div>
+        )}
+        <ul className="nav-menu-items">
+          {mobileItems.map((item, index) => (
+            <li key={`${item.title}-${index}`} className={item.cName}>
+              {item.onClick ? (
+                <button type="button" onClick={item.onClick}>
+                  {item.icon}
+                  <span>{replacePatientText(item.title, useClientTerminology)}</span>
+                </button>
+              ) : (
+                <NavLink
+                  to={item.path}
+                  onClick={closeSidebar}
+                  className={({ isActive }) => isActive ? "active" : ""}
+                >
+                  {item.icon}
+                  <span>{replacePatientText(item.title, useClientTerminology)}</span>
+                </NavLink>
+              )}
             </li>
           ))}
         </ul>

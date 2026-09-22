@@ -120,43 +120,53 @@ function Assessments() {
   return (
     <div className="assessments-page">
       <div className="assessments-wrapper">
-        <div className="assessments-header-row">
-          <h2 className="assessments-title">Assessments</h2>
-          <button
-            className="assessments-action-btn assessments-action-btn-secondary"
-            onClick={() => navigate("/question-types")}
-          >
-            Question Types
-          </button>
-        </div>
+        <header className="assessments-header-row portal-page-header">
+          <div>
+            <p className="portal-page-kicker">Clinical library</p>
+            <h1 className="assessments-title portal-page-title">
+              Assessments
+              <span className="portal-page-count">{filteredAssessments.length}</span>
+            </h1>
+            <p className="portal-page-subtitle">Build and manage the assessments used across patient care.</p>
+          </div>
+          <div className="portal-page-actions">
+            <button
+              className="assessments-action-btn assessments-action-btn-secondary"
+              onClick={() => navigate("/question-types")}
+            >
+              Question Types
+            </button>
+            <button
+              className="assessments-action-btn portal-primary-action"
+              onClick={() => setShowCreateModal(true)}
+            >
+              + Add New Assessment
+            </button>
+          </div>
+        </header>
 
-        <div className="assessments-toolbar">
-          <input
-            className="assessments-search"
-            placeholder="Search assessments..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="assessments-actions">
-          <button
-            className="assessments-action-btn"
-            onClick={() => setShowCreateModal(true)}
-          >
-            + Add New Assessment
-          </button>
-        </div>
-
-        <div className="assessments-filters">
-          <label className="assessments-checkbox-label">
+        <div className="assessments-toolbar portal-command-bar">
+          <label className="portal-search-field" htmlFor="assessments-search">
+            <span>Search</span>
             <input
-              type="checkbox"
-              checked={showInactiveAssessments}
-              onChange={(e) => setShowInactiveAssessments(e.target.checked)}
+              id="assessments-search"
+              className="assessments-search portal-search-input"
+              placeholder="Search assessments..."
+              aria-label="Search assessments"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
-            Show Inactive Assessments
           </label>
+          <div className="assessments-filters">
+            <label className="assessments-checkbox-label">
+              <input
+                type="checkbox"
+                checked={showInactiveAssessments}
+                onChange={(e) => setShowInactiveAssessments(e.target.checked)}
+              />
+              Show Inactive Assessments
+            </label>
+          </div>
         </div>
 
         {loading ? (
@@ -174,7 +184,7 @@ function Assessments() {
             ))}
           </div>
         ) : filteredAssessments.length === 0 ? (
-          <p>No assessments found.</p>
+          <p className="portal-empty-state">No assessments found.</p>
         ) : (
           <div className="assessments-grid">
             {filteredAssessments.map((assessment, index) => (
@@ -186,32 +196,38 @@ function Assessments() {
                   const isActive = getAssessmentIsActive(assessment);
                   return (
                     <>
-                <h3>
-                  {assessment.first_name} {assessment.last_name}
-                </h3>
-                <p>
-                  <strong className="assessment-name">{assessment.name}</strong>
+                <div className="assessment-card-topline">
+                  <span className="assessment-card-index">
+                    Assessment {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className={`assessment-status-pill ${isActive ? "active" : "inactive"}`}>
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
+
+                <h3 className="assessment-name">{assessment.name}</h3>
+                <p className="assessment-description">
+                  {assessment.description || "No description provided."}
                 </p>
-                <p>
-                  <strong className="assessment-card-label">Description:</strong> {assessment.description}
-                </p>
-                <p>
-                  <strong className="assessment-card-label">Created On:</strong> {formatDate(assessment.created_on)}
-                </p>
-                <p>
-                  <strong className="assessment-card-label">Total Questions:</strong> {assessment.question_count}
-                </p>
-                {/* <p>
-                  <strong>Total Taken:</strong> {formatDate(assessment.last_login)}
-                </p> */}
-                <p>
-                  <span className="assessment-status-row">
-                    <span>
-                      <strong className="assessment-card-label">Status:</strong>{" "}
-                      <span className={`assessment-status-pill ${isActive ? "active" : "inactive"}`}>
-                        {isActive ? "Active" : "Inactive"}
-                      </span>
-                    </span>
+
+                <div className="assessment-card-meta">
+                  <div>
+                    <span>Owner</span>
+                    <strong>
+                      {[assessment.first_name, assessment.last_name].filter(Boolean).join(" ") || "—"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Created</span>
+                    <strong>{formatDate(assessment.created_on)}</strong>
+                  </div>
+                  <div>
+                    <span>Questions</span>
+                    <strong>{assessment.question_count ?? 0}</strong>
+                  </div>
+                </div>
+
+                <div className="assessment-card-actions">
                     <button
                       className="clone-btn"
                       onClick={() => handleCloneAssessment(assessment.assessment_id)}
@@ -221,15 +237,13 @@ function Assessments() {
                         ? "Cloning assessment..."
                         : "Clone this assessment"}
                     </button>
-                  </span>
-                </p>
-
-                {/* Reset Password Button (UI only) */}
-                <button
-                  className="details-btn"
-                  onClick={() => navigate(`/assessment-details/${assessment.assessment_id}`)}
-                >
-                  Show Details</button>
+                    <button
+                      className="details-btn"
+                      onClick={() => navigate(`/assessment-details/${assessment.assessment_id}`)}
+                    >
+                      Show Details
+                    </button>
+                </div>
                     </>
                   );
                 })()}

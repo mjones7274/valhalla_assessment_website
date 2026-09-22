@@ -1,5 +1,12 @@
 import React from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
+import {
+  FaArrowRight,
+  FaBuilding,
+  FaClipboardList,
+  FaUserInjured,
+  FaUsers,
+} from "react-icons/fa";
 
 import { replacePatientText, shouldUseClientTerminology } from "../uiTerminology";
 
@@ -19,27 +26,31 @@ function Home() {
   const allCards = [
     {
       title: "Assessments",
-      description:
-        "create and manage assessments.",
+      description: "Create, organize, and manage clinical assessments.",
       path: "/assessments",
+      icon: FaClipboardList,
+      eyebrow: "Clinical library",
     },
     {
       title: "Patients",
-      description:
-        "Manage and track patient information, treatment plans, and progress.",
+      description: "Manage patient records, treatment plans, and assessment progress.",
       path: "/patients",
+      icon: FaUserInjured,
+      eyebrow: "Patient operations",
     },
     {
       title: "Companies",
-      description:
-        "Create and manage companies.",
+      description: "Manage organizations, access, and production settings.",
       path: "/companies",
+      icon: FaBuilding,
+      eyebrow: "Organizations",
     },
     {
       title: "Users",
-      description:
-        "Create and manage users.",
+      description: "Manage portal access, roles, and company assignments.",
       path: "/users",
+      icon: FaUsers,
+      eyebrow: "Access management",
     },
   ];
 
@@ -66,27 +77,45 @@ function Home() {
 
   return (
     <div className="home-container">
-      {/* Welcome description */}
-      <section className="welcome">
-        <p className="description">
+      <header className="home-header">
+        <p className="home-kicker">Valhalla Assessments</p>
+        <h1>Clinical workspace</h1>
+        <p className="home-description">
           {replacePatientText(
             "Manage and track assessments, treatment plans, and progress for TBI patients.",
             useClientTerminology
           )}
         </p>
-      </section>
+      </header>
 
-      {/* Feature Cards */}
-      <section className="features">
+      <section className="features" aria-label="Portal sections">
         {cards.map((card, index) => (
-          <div
-            key={index}
-            className="feature-card clickable"
+          <button
+            key={card.path}
+            type="button"
+            className="feature-card"
             onClick={() => navigate(card.path)}
+            style={{ "--home-card-order": index }}
           >
-            <h2>{replacePatientText(card.title, useClientTerminology)}</h2>
-            <p>{replacePatientText(card.description, useClientTerminology)}</p>
-          </div>
+            <span className="feature-card-topline">
+              <span className="feature-card-icon" aria-hidden="true">
+                <card.icon />
+              </span>
+              <span className="feature-card-eyebrow">{card.eyebrow}</span>
+            </span>
+            <span className="feature-card-copy">
+              <span className="feature-card-title">
+                {replacePatientText(card.title, useClientTerminology)}
+              </span>
+              <span className="feature-card-description">
+                {replacePatientText(card.description, useClientTerminology)}
+              </span>
+            </span>
+            <span className="feature-card-link">
+              Open section
+              <FaArrowRight aria-hidden="true" />
+            </span>
+          </button>
         ))}
       </section>
     </div>
