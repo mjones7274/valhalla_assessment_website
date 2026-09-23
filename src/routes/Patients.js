@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { FaChevronDown, FaChevronRight, FaListAlt, FaSyncAlt, FaTrash } from "react-icons/fa";
+import { FaChevronDown, FaChevronRight, FaSyncAlt, FaTrash } from "react-icons/fa";
 import { Eye, List, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
@@ -3823,7 +3823,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
               <div className="modal-actions">
                 {(supplementOptionsError || supplementOrderSaveError) && (
-                  <p style={{ color: "#dc2626", marginRight: "auto" }}>
+                  <p className="supplement-order-error" style={{ color: "#dc2626", marginRight: "auto" }}>
                     {supplementOptionsError || supplementOrderSaveError}
                   </p>
                 )}
@@ -3850,7 +3850,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
 
         {showSupplementOrderPayloadModal && (
           <div className="modal-overlay" style={{ zIndex: 1370 }}>
-            <div className="modal modern" style={{ width: "min(900px, 92vw)" }}>
+            <div className="modal modern supplement-order-payload-modal" style={{ width: "min(900px, 92vw)" }}>
               <div className="modal-header">
                 <h3>Supplement Order Request / Response</h3>
                 <button
@@ -3865,6 +3865,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
               </div>
 
               <div
+                className="supplement-order-payload-content"
                 style={{
                   maxHeight: "70vh",
                   overflow: "auto",
