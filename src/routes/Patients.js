@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { FaChevronDown, FaChevronRight, FaListAlt, FaSyncAlt, FaTrash } from "react-icons/fa";
+import { Eye, List, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import CognitrackXInvoice from "./CognitrackXInvoice";
@@ -1645,24 +1646,30 @@ const Patients = () => {
                   </td>
                   <td className="actions">
                     <button
+                      type="button"
+                      className="patient-row-icon-btn patient-row-view-icon-btn"
                       title="View Details"
+                      aria-label="View details"
                       onClick={(event) => {
                         event.stopPropagation();
                         setSelectedPatient(p);
                         setModalMode("view");
                       }}
                     >
-                      👁
+                      <Eye strokeWidth={1.75} />
                     </button>
                     <button
+                      type="button"
+                      className="patient-row-icon-btn patient-row-edit-icon-btn"
                       title={`Edit ${patientLabels.singular}`}
+                      aria-label={`Edit ${patientLabels.singularLower}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         setSelectedPatient(p);
                         setModalMode("edit");
                       }}
                     >
-                      ✏️
+                      <Pencil strokeWidth={1.75} />
                     </button>
                   </td>
                 </tr>
@@ -3399,7 +3406,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                                       title="Delete injury event"
                                       onClick={() => handleOpenDeleteEvent(eventItem)}
                                     >
-                                      <FaTrash style={{ color: "#dc2626" }} />
+                                      <FaTrash className="icon-button" style={{ color: "#dc2626" }} />
                                     </button>
                                   </div>
                                 </td>
@@ -4759,7 +4766,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
                                     title="Delete injury event"
                                     onClick={() => handleOpenDeleteEvent(index)}
                                   >
-                                    <FaTrash style={{ color: "#dc2626" }} />
+                                    <FaTrash className="icon-button" style={{ color: "#dc2626" }} />
                                   </button>
                                 </div>
                               </td>
@@ -7504,28 +7511,41 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                           </div>
                         )}
                         <div className="assessment-card-header-actions">
-                          {userTypeId === 3 && (
+                          {!isDisabledForActions && attemptId && (
+                            <button
+                              type="button"
+                              className="assessment-card-refresh-btn"
+                              title={isRefreshingCard ? "Refreshing assessment" : "Refresh this assessment"}
+                              aria-label={isRefreshingCard ? "Refreshing assessment" : "Refresh this assessment"}
+                              onClick={() => handleRefreshAttemptCard(attempt)}
+                              disabled={isRefreshingCard}
+                            >
+                              <RefreshCw className={isRefreshingCard ? "spin" : ""} strokeWidth={1.5} />
+                            </button>
+                          )}
+                          {userTypeId === 3 && attemptId && (
                             <button
                               type="button"
                               className="assessment-card-header-icon-btn"
                               title="View assessment logs"
                               aria-label="View assessment logs"
                               onClick={() => handleOpenAttemptLogs(attempt)}
-                              disabled={!attemptId}
                             >
-                              <FaListAlt />
+                              <List strokeWidth={1.5} />
                             </button>
                           )}
                           {!isDisabledForActions && (
                             <button
                               type="button"
-                              className="assessment-card-refresh-btn"
-                              title="Refresh this assessment"
-                              aria-label="Refresh this assessment"
-                              onClick={() => handleRefreshAttemptCard(attempt)}
-                              disabled={isRefreshingCard || !attemptId}
+                              className="assessment-card-header-icon-btn assessment-card-delete-icon-btn"
+                              title="Remove assessment"
+                              aria-label="Remove assessment"
+                              onClick={() => {
+                                setDeletingAssessmentAttempt(attempt);
+                                setIsDeleteAssessmentOpen(true);
+                              }}
                             >
-                              <FaSyncAlt className={isRefreshingCard ? "spin" : ""} />
+                              <Trash2 strokeWidth={1.5} />
                             </button>
                           )}
                         </div>
@@ -7562,9 +7582,9 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                           {isCompleted && completedAtText && (
                             <span
                               className="assessment-completed-date"
-                              style={{ fontWeight: 400, color: "#475569" }}
+                              style={{ fontWeight: 400, color: "#cbd5e1" }}
                             >
-                              <span style={{ color: "#2563eb" }}>Date:</span>{" "}
+                              <span style={{ color: "#7dd3fc" }}>Date:</span>{" "}
                               {completedAtText}
                             </span>
                           )}
@@ -7604,90 +7624,70 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               gap: "6px",
                             }}
                           >
-                            {isCompleted && (
+                            {isCompleted && !(
+                              loadingGeneratedPreview?.attemptId === attemptId &&
+                              loadingGeneratedPreview?.type === "invoice"
+                            ) && (
                               <button
                                 type="button"
                                 className="assessments-action-btn"
                                 onClick={() => handleOpenGeneratedInvoice(attempt)}
-                                disabled={
-                                  loadingGeneratedPreview?.attemptId === attemptId &&
-                                  loadingGeneratedPreview?.type === "invoice"
-                                }
                               >
-                                {loadingGeneratedPreview?.attemptId === attemptId &&
-                                loadingGeneratedPreview?.type === "invoice"
-                                  ? "Generating..."
-                                  : "Generate Invoice"}
+                                Generate Invoice
                               </button>
                             )}
-                            {isCompleted && (
+                            {isCompleted && !(
+                              loadingGeneratedPreview?.attemptId === attemptId &&
+                              loadingGeneratedPreview?.type === "report"
+                            ) && (
                               <button
                                 type="button"
                                 className="assessments-action-btn"
                                 onClick={() => handleOpenGeneratedReport(attempt, matchedEvent)}
-                                disabled={
-                                  loadingGeneratedPreview?.attemptId === attemptId &&
-                                  loadingGeneratedPreview?.type === "report"
-                                }
                               >
-                                {loadingGeneratedPreview?.attemptId === attemptId &&
-                                loadingGeneratedPreview?.type === "report"
-                                  ? "Loading..."
-                                  : "Show Report"}
+                                Show Report
                               </button>
                             )}
-                            {userTypeId === 3 && (
+                            {userTypeId === 3 && isCompleted && loadingAnswersAttemptId !== attemptId && (
                               <button
                                 type="button"
                                 className="assessments-action-btn"
-                                disabled={!isCompleted || loadingAnswersAttemptId === attemptId}
                                 onClick={() => handleViewAnswers(attempt)}
                               >
-                                {loadingAnswersAttemptId === attemptId ? "Loading..." : "View Answers"}
+                                View Answers
                               </button>
                             )}
-                            {!isCompleted && (
+                            {!isCompleted && !isDisabledForActions && (
                               <button
                                 type="button"
                                 className="assessments-action-btn"
-                                disabled={isDisabledForActions}
                                 onClick={() => handleCopyAssessmentUrl(attempt)}
                               >
                                 Copy URL
                               </button>
                             )}
-                            <button
-                              type="button"
-                              className="assessments-action-btn"
-                              disabled={isDisabledForActions || isRotatingToken}
-                              onClick={() => {
-                                handleSendLink(attempt);
-                              }}
-                            >
-                              Resend Email
-                            </button>
-                            <button
-                              type="button"
-                              className="assessments-action-btn"
-                              disabled={isDisabledForActions || isRotatingToken}
-                              onClick={() => {
-                                handleGenerateNewLink(attempt);
-                              }}
-                            >
-                              {isRotatingToken ? "Generating..." : "Generate New Link"}
-                            </button>
-                            <button
-                              type="button"
-                              className="remove-assessment-btn"
-                              title="Remove assessment"
-                              disabled={isDisabledForActions}
-                              onClick={() => {
-                                setDeletingAssessmentAttempt(attempt);
-                                setIsDeleteAssessmentOpen(true);
-                              }}
-                            >
-                              Remove Assessment
-                            </button>
+                            {!isDisabledForActions && !isRotatingToken && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                onClick={() => {
+                                  handleSendLink(attempt);
+                                }}
+                              >
+                                Resend Email
+                              </button>
+                            )}
+                            {!isDisabledForActions && !isRotatingToken && (
+                              <button
+                                type="button"
+                                className="assessments-action-btn"
+                                onClick={() => {
+                                  handleGenerateNewLink(attempt);
+                                }}
+                              >
+                                Generate New Link
+                              </button>
+                            )}
                           </div>
 
                         </div>
@@ -7994,35 +7994,17 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         )}
 
         {isDeleteAssessmentOpen && deletingAssessmentAttempt && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              backgroundColor: "rgba(0,0,0,0.4)",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              zIndex: 1300,
-            }}
-          >
-            <div
-              style={{
-                background: "#fff",
-                padding: "24px",
-                width: "440px",
-                borderRadius: "8px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              }}
-            >
-              <h3 style={{ marginBottom: "12px", color: "#dc3545" }}>
+          <div className="modal-overlay assessment-delete-overlay" style={{ zIndex: 1300 }}>
+            <div className="modal modern assessment-delete-modal">
+              <h3>
                 Remove Assessment
               </h3>
 
-              <p style={{ marginBottom: "20px", color: "#444" }}>
+              <p>
                 Are you sure you want to remove this assessment from this {patientLabels.singularLower}?
               </p>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <div className="modal-actions">
                 <button
                   disabled={deletingAssessmentInProgress}
                   onClick={() => {
@@ -8035,15 +8017,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                 </button>
 
                 <button
-                  style={{
-                    background: "#dc3545",
-                    color: "#fff",
-                    border: "none",
-                    padding: "6px 12px",
-                    borderRadius: "4px",
-                    cursor: deletingAssessmentInProgress ? "not-allowed" : "pointer",
-                    opacity: deletingAssessmentInProgress ? 0.7 : 1,
-                  }}
+                  className="assessment-delete-confirm-btn"
                   disabled={deletingAssessmentInProgress}
                   onClick={async () => {
                     if (deletingAssessmentInProgress) return;

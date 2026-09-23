@@ -288,12 +288,14 @@ function AssessmentDetails() {
     cursor: "pointer",
     marginLeft: "12px",
     color: "#17a2b8",
+    fontSize: "22px",
   };
 
   const editIconStyle = {
     cursor: "pointer",
     marginLeft: "12px",
     color: "#007bff", // strong blue
+    fontSize: "22px",
   };
 
   const addToTotalPillStyle = {
@@ -3136,7 +3138,7 @@ const compareQuestionOrder = (left, right) => {
                     style={{
                       cursor: "pointer",
                       color: "#007bff",
-                      fontSize: "1.2rem",
+                      fontSize: "22px",
                     }}
                     onClick={() => {
                       setEditingSectionId(section.section_id);
@@ -3157,7 +3159,7 @@ const compareQuestionOrder = (left, right) => {
                     style={{
                       cursor: "pointer",
                       color: "#0f766e",
-                      fontSize: "1.2rem",
+                      fontSize: "22px",
                     }}
                   />
 
@@ -3174,7 +3176,7 @@ const compareQuestionOrder = (left, right) => {
                     style={{
                       cursor: "pointer",
                       color: "#dc3545",
-                      fontSize: "1.25rem", // 👈 slightly larger than question icons
+                      fontSize: "22px",
                       marginLeft: "12px",
                     }}
                   />
@@ -6381,6 +6383,7 @@ const compareQuestionOrder = (left, right) => {
 
         {isSectionTranslationsOpen && (
           <div
+            className="question-translation-overlay"
             style={{
               position: "fixed",
               inset: 0,
@@ -6393,6 +6396,7 @@ const compareQuestionOrder = (left, right) => {
             }}
           >
             <div
+              className="question-translation-modal section-translation-modal"
               style={{
                 width: "min(920px, 100%)",
                 maxHeight: "90vh",
@@ -6406,6 +6410,7 @@ const compareQuestionOrder = (left, right) => {
               }}
             >
               <div
+                className="question-translation-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -6416,14 +6421,15 @@ const compareQuestionOrder = (left, right) => {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                  <div className="question-translation-title" style={{ fontWeight: 800, color: "#0f172a" }}>
                     Section Language Translations{activeSectionTranslationTarget?.title ? `: ${activeSectionTranslationTarget.title}` : ""}
                   </div>
-                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                  <div className="question-translation-subtitle" style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
                     Manage section translations{assessmentDetails?.name ? ` for ${assessmentDetails.name}` : ""}.
                   </div>
                 </div>
                 <button
+                  className="question-translation-close-btn"
                   onClick={closeSectionTranslationsModal}
                   style={{
                     background: "#fff",
@@ -6440,6 +6446,7 @@ const compareQuestionOrder = (left, right) => {
               </div>
 
               <div
+                className="question-translation-body"
                 style={{
                   padding: "20px",
                   overflow: "auto",
@@ -6449,6 +6456,7 @@ const compareQuestionOrder = (left, right) => {
                 }}
               >
                 <div
+                  className="question-translation-panel"
                   style={{
                     background: "#fff",
                     border: "1px solid #e2e8f0",
@@ -6457,10 +6465,11 @@ const compareQuestionOrder = (left, right) => {
                     boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
                   }}
                 >
-                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
+                  <div className="question-translation-panel-title" style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
                     Language
                   </div>
                   <label
+                    className="question-translation-label"
                     style={{
                       display: "grid",
                       gap: "8px",
@@ -6470,6 +6479,7 @@ const compareQuestionOrder = (left, right) => {
                   >
                     <span>Select language</span>
                     <select
+                      className="question-translation-select"
                       value={selectedSectionLanguageCode}
                       onChange={(e) => setSelectedSectionLanguageCode(e.target.value)}
                       disabled={languagesLoading}
@@ -6494,12 +6504,12 @@ const compareQuestionOrder = (left, right) => {
                     </select>
                   </label>
                   {languagesLoading && (
-                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                    <div className="question-translation-helper" style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
                       Loading languages...
                     </div>
                   )}
                   {selectedSectionLanguageCode === "en" && (
-                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                    <div className="question-translation-helper" style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
                       Select a non-English language to edit translated section details.
                     </div>
                   )}
@@ -6507,6 +6517,7 @@ const compareQuestionOrder = (left, right) => {
 
                 {selectedSectionLanguageCode !== "en" && (
                   <div
+                    className="question-translation-panel"
                     style={{
                       background: "#fff",
                       border: "1px solid #e2e8f0",
@@ -6516,6 +6527,7 @@ const compareQuestionOrder = (left, right) => {
                     }}
                   >
                     <div
+                      className="question-translation-toolbar"
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
@@ -6525,8 +6537,9 @@ const compareQuestionOrder = (left, right) => {
                         flexWrap: "wrap",
                       }}
                     >
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>Section Details</div>
+                      <div className="question-translation-panel-title" style={{ fontWeight: 700, color: "#0f172a" }}>Section Details</div>
                       <button
+                        className="question-translation-save-btn"
                         type="button"
                         onClick={handleSaveSectionTranslation}
                         disabled={savingSectionTranslation}
@@ -6554,13 +6567,14 @@ const compareQuestionOrder = (left, right) => {
                     </div>
 
                     {loadingSectionTranslation ? (
-                      <div style={{ color: "#64748b", fontSize: "0.95rem" }}>
+                      <div className="question-translation-helper" style={{ color: "#64748b", fontSize: "0.95rem" }}>
                         Loading section translation...
                       </div>
                     ) : (
                       <>
                         {sectionTranslationError && (
                           <div
+                            className="question-translation-error"
                             style={{
                               marginBottom: "14px",
                               padding: "10px 12px",
@@ -6577,6 +6591,7 @@ const compareQuestionOrder = (left, right) => {
 
                         {sectionTranslationSuccessMessage && (
                           <div
+                            className="question-translation-success"
                             style={{
                               marginBottom: "14px",
                               padding: "10px 12px",
@@ -6591,7 +6606,7 @@ const compareQuestionOrder = (left, right) => {
                           </div>
                         )}
 
-                        <div style={{ display: "grid", gap: "14px" }}>
+                        <div className="question-translation-fields" style={{ display: "grid", gap: "14px" }}>
                           {Object.entries(sectionTranslationFieldLabels).map(([field, label]) => {
                             const isLongText = field !== "title";
 
@@ -6653,6 +6668,7 @@ const compareQuestionOrder = (left, right) => {
 
         {isQuestionTranslationsOpen && (
           <div
+            className="question-translation-overlay"
             style={{
               position: "fixed",
               inset: 0,
@@ -6665,6 +6681,7 @@ const compareQuestionOrder = (left, right) => {
             }}
           >
             <div
+              className="question-translation-modal"
               style={{
                 width: "min(1100px, 100%)",
                 maxHeight: "92vh",
@@ -6678,6 +6695,7 @@ const compareQuestionOrder = (left, right) => {
               }}
             >
               <div
+                className="question-translation-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -6688,15 +6706,16 @@ const compareQuestionOrder = (left, right) => {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                  <div className="question-translation-title" style={{ fontWeight: 800, color: "#0f172a" }}>
                     Question Language Translations{activeQuestionTranslationTarget?.title ? `: ${activeQuestionTranslationTarget.title}` : ""}
                   </div>
-                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                  <div className="question-translation-subtitle" style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
                     Manage question translations{assessmentDetails?.name ? ` for ${assessmentDetails.name}` : ""}.
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <div className="question-translation-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                   <button
+                    className="question-translation-preview-btn"
                     onClick={handleShowQuestionTranslationPreview}
                     disabled={loadingQuestionTranslation}
                     style={{
@@ -6712,6 +6731,7 @@ const compareQuestionOrder = (left, right) => {
                     Show Question
                   </button>
                   <button
+                    className="question-translation-close-btn"
                     onClick={closeQuestionTranslationsModal}
                     style={{
                       background: "#fff",
@@ -6729,6 +6749,7 @@ const compareQuestionOrder = (left, right) => {
               </div>
 
               <div
+                className="question-translation-body"
                 style={{
                   padding: "20px",
                   overflow: "auto",
@@ -6738,6 +6759,7 @@ const compareQuestionOrder = (left, right) => {
                 }}
               >
                 <div
+                  className="question-translation-panel"
                   style={{
                     background: "#fff",
                     border: "1px solid #e2e8f0",
@@ -6746,10 +6768,11 @@ const compareQuestionOrder = (left, right) => {
                     boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
                   }}
                 >
-                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
+                  <div className="question-translation-panel-title" style={{ fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>
                     Language
                   </div>
                   <label
+                    className="question-translation-label"
                     style={{
                       display: "grid",
                       gap: "8px",
@@ -6759,6 +6782,7 @@ const compareQuestionOrder = (left, right) => {
                   >
                     <span>Select language</span>
                     <select
+                      className="question-translation-select"
                       value={selectedQuestionLanguageCode}
                       onChange={(e) => setSelectedQuestionLanguageCode(e.target.value)}
                       disabled={languagesLoading}
@@ -6783,12 +6807,12 @@ const compareQuestionOrder = (left, right) => {
                     </select>
                   </label>
                   {languagesLoading && (
-                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                    <div className="question-translation-helper" style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
                       Loading languages...
                     </div>
                   )}
                   {selectedQuestionLanguageCode === "en" && (
-                    <div style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
+                    <div className="question-translation-helper" style={{ marginTop: "10px", color: "#64748b", fontSize: "0.9rem" }}>
                       Select a non-English language to edit translated question details.
                     </div>
                   )}
@@ -6796,6 +6820,7 @@ const compareQuestionOrder = (left, right) => {
 
                 {selectedQuestionLanguageCode !== "en" && (
                   <div
+                    className="question-translation-panel"
                     style={{
                       background: "#fff",
                       border: "1px solid #e2e8f0",
@@ -6805,6 +6830,7 @@ const compareQuestionOrder = (left, right) => {
                     }}
                   >
                     <div
+                      className="question-translation-toolbar"
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
@@ -6814,8 +6840,9 @@ const compareQuestionOrder = (left, right) => {
                         flexWrap: "wrap",
                       }}
                     >
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>Question Details</div>
+                      <div className="question-translation-panel-title" style={{ fontWeight: 700, color: "#0f172a" }}>Question Details</div>
                       <button
+                        className="question-translation-save-btn"
                         type="button"
                         onClick={handleSaveQuestionTranslation}
                         disabled={savingQuestionTranslation}
@@ -6843,13 +6870,14 @@ const compareQuestionOrder = (left, right) => {
                     </div>
 
                     {loadingQuestionTranslation ? (
-                      <div style={{ color: "#64748b", fontSize: "0.95rem" }}>
+                      <div className="question-translation-helper" style={{ color: "#64748b", fontSize: "0.95rem" }}>
                         Loading question translation...
                       </div>
                     ) : (
                       <>
                         {questionTranslationError && (
                           <div
+                            className="question-translation-error"
                             style={{
                               marginBottom: "14px",
                               padding: "10px 12px",
@@ -6866,6 +6894,7 @@ const compareQuestionOrder = (left, right) => {
 
                         {questionTranslationSuccessMessage && (
                           <div
+                            className="question-translation-success"
                             style={{
                               marginBottom: "14px",
                               padding: "10px 12px",
@@ -6880,16 +6909,18 @@ const compareQuestionOrder = (left, right) => {
                           </div>
                         )}
 
-                        <QuestionTranslationFields
-                          isOpen={isQuestionTranslationsOpen}
-                          editingQuestion={questionTranslationFormData}
-                          setEditingQuestion={setQuestionTranslationFormData}
-                          questionTypes={questionTypes}
-                          selectedQuestionType={selectedQuestionTranslationType}
-                          editableFields={questionTranslationEditableFields}
-                          forceChoicesJson={isQuestionTranslationCreateMode}
-                          forceHyperlinkField={isQuestionTranslationCreateMode}
-                        />
+                        <div className="question-translation-fields">
+                          <QuestionTranslationFields
+                            isOpen={isQuestionTranslationsOpen}
+                            editingQuestion={questionTranslationFormData}
+                            setEditingQuestion={setQuestionTranslationFormData}
+                            questionTypes={questionTypes}
+                            selectedQuestionType={selectedQuestionTranslationType}
+                            editableFields={questionTranslationEditableFields}
+                            forceChoicesJson={isQuestionTranslationCreateMode}
+                            forceHyperlinkField={isQuestionTranslationCreateMode}
+                          />
+                        </div>
                       </>
                     )}
                   </div>

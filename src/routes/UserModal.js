@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { FaEdit, FaTrash } from "react-icons/fa";
+import { Pencil } from "lucide-react";
 import Detail from "./Detail"; // or inline if you want
 import { apiRequest } from "../api";
 import { useOutletContext } from "react-router-dom";
@@ -1185,7 +1186,7 @@ const UserModal = ({ mode, user, onClose, onSaved, onUserUpdated }) => {
                             aria-label="Edit user type"
                             onClick={openUserTypeModal}
                           >
-                            <FaEdit />
+                            <Pencil strokeWidth={1.75} />
                           </button>
                         )}
                       </span>

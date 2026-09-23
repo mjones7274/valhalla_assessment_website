@@ -200,9 +200,38 @@
 }
 
 .patients-page td.actions button {
-  margin-right: 0;
-  margin-left: 3px;
-  margin-right: 3px;
+  margin: 0;
+}
+
+.patients-page td.actions .patient-row-icon-btn + .patient-row-icon-btn {
+  margin-left: 10px;
+}
+
+#root .patients-page td.actions .patient-row-icon-btn,
+#root .patients-page td.actions .patient-row-icon-btn:hover:not(:disabled) {
+  appearance: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root .patients-page td.actions .patient-row-icon-btn svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+#root .patients-page td.actions .patient-row-view-icon-btn {
+  color: #38bdf8 !important;
+}
+
+#root .patients-page td.actions .patient-row-edit-icon-btn {
+  color: #fbbf24 !important;
 }
 
 .assessments-action-btn {
@@ -1141,7 +1170,7 @@
 .assessment-card-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 10px;
   margin-left: auto;
 }
 
@@ -1153,10 +1182,31 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: auto;
+  height: auto;
   border-radius: 999px;
   cursor: pointer;
+}
+
+#root .patient-assessments-modal .assessment-card-header-actions .assessment-card-refresh-btn,
+#root .patient-assessments-modal .assessment-card-header-actions .assessment-card-header-icon-btn,
+#root .patient-assessments-modal .assessment-card-header-actions .assessment-card-refresh-btn:hover,
+#root .patient-assessments-modal .assessment-card-header-actions .assessment-card-header-icon-btn:hover {
+  appearance: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root .patient-assessments-modal .assessment-card-header-actions button svg {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .assessment-card-refresh-btn:hover:not(:disabled),
@@ -1165,10 +1215,26 @@
   color: #1d4ed8;
 }
 
+.patient-assessments-modal .assessment-card-header-actions .assessment-card-delete-icon-btn,
+.patient-assessments-modal .assessment-card-header-actions .assessment-card-delete-icon-btn svg {
+  color: #ef4444 !important;
+  fill: none !important;
+}
+
+.patient-assessments-modal .assessment-card-header-actions .assessment-card-delete-icon-btn:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #dc2626 !important;
+}
+
 .assessment-card-refresh-btn:disabled,
 .assessment-card-header-icon-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+#root .patient-assessments-modal .assessment-card-refresh-btn:disabled {
+  opacity: 1;
+  cursor: wait;
 }
 
 .assessment-card-refresh-btn .spin {
@@ -1202,16 +1268,28 @@
   flex-wrap: wrap;
 }
 
-.assessment-status-group {
+.patient-assessments-modal .assessment-status-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  width: max-content;
+  white-space: nowrap;
+  margin-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
 }
 
 .assessment-status-row.completed-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   gap: 12px;
+}
+
+.assessment-status-row.completed-layout .assessment-status-group,
+.assessment-status-row.completed-layout .assessment-status-badge {
+  justify-self: start;
 }
 
 .assessment-status-row.completed-layout .assessment-classification-badge {
@@ -1220,7 +1298,7 @@
 
 .assessment-status-row.completed-layout .assessment-completed-date {
   justify-self: end;
-  text-align: right;
+  text-align: left;
 }
 
 .patient-assessments-modal .assessment-card-meta strong,
@@ -1228,13 +1306,15 @@
   color: #1d4ed8;
 }
 
-.assessment-status-badge {
+.patient-assessments-modal .assessment-status-badge {
   display: inline-block;
   padding: 2px 8px;
+  margin-bottom: 0;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.2;
+  text-transform: none;
 }
 
 .assessment-status-badge.removed {
@@ -1257,10 +1337,16 @@
   color: #92400e;
 }
 
-.assessment-progress-inline {
+.patient-assessments-modal .assessment-progress-inline {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  margin: 0 0 0 4px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .assessment-progress-inline progress {
@@ -1295,9 +1381,13 @@
   border-radius: 999px;
 }
 
-.assessment-progress-text {
+.patient-assessments-modal .assessment-progress-text {
+  display: inline;
+  margin-bottom: 0;
   font-size: 0.78rem;
   color: #374151;
+  font-weight: 400;
+  text-transform: none;
 }
 
 .assessment-card-event {
@@ -1337,8 +1427,7 @@
   justify-content: flex-end;
 }
 
-.patient-assessments-modal .assessment-card-actions .assessments-action-btn,
-.patient-assessments-modal .assessment-card-actions .remove-assessment-btn {
+.patient-assessments-modal .assessment-card-actions .assessments-action-btn {
   padding: 4px 8px;
   font-size: 0.78rem;
 }
@@ -1444,11 +1533,25 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #17233a;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.modal-overlay:has(.assessment-logs-modal),
+.assessment-delete-overlay {
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.assessment-logs-modal .modal-header h3 {
+  color: #f8fbff;
 }
 
 .assessment-logs-subtitle {
   margin-top: 3px;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.85rem;
 }
 
@@ -1460,20 +1563,20 @@
 
 .assessment-logs-table-wrap {
   overflow: auto;
-  border: 1px solid #dbe4f0;
+  border: 1px solid #334766;
   border-radius: 8px;
 }
 
 .assessment-logs-table {
   width: 100%;
   border-collapse: collapse;
-  background: #ffffff;
+  background: #121c2e;
 }
 
 .assessment-logs-table th,
 .assessment-logs-table td {
   padding: 10px 12px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #253551;
   text-align: left;
   vertical-align: top;
 }
@@ -1482,16 +1585,50 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
-  color: #334155;
+  background: #1e2c46;
+  color: #7dd3fc;
   font-size: 0.78rem;
   white-space: nowrap;
 }
 
 .assessment-logs-table td {
-  color: #1f2937;
+  color: #dbeafe;
   font-size: 0.84rem;
   overflow-wrap: anywhere;
+}
+
+.assessment-logs-table tbody tr:hover td {
+  background: rgba(125, 211, 252, 0.06);
+}
+
+.assessment-logs-modal .people-empty {
+  color: #cbd5e1;
+}
+
+.assessment-logs-modal .api-debug-error {
+  color: #fca5a5;
+}
+
+#root .assessment-logs-modal .icon-close {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: #cbd5e1 !important;
+  font-size: 18px;
+}
+
+#root .assessment-logs-modal .modal-actions button,
+#root .assessment-delete-modal .modal-actions button:not(.assessment-delete-confirm-btn) {
+  background: #0f1a2d !important;
+  border-color: #334766 !important;
+  color: #dbeafe !important;
+}
+
+#root .assessment-logs-modal .modal-actions button:hover:not(:disabled),
+#root .assessment-delete-modal .modal-actions button:not(.assessment-delete-confirm-btn):hover:not(:disabled) {
+  background: #1e2c46 !important;
+  border-color: #4b6387 !important;
+  color: #f8fbff !important;
 }
 
 .assessment-logs-table td.assessment-log-field-timestamp,
@@ -1509,12 +1646,43 @@
   margin: 0;
   padding: 8px;
   border-radius: 6px;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #0f1a2d;
+  color: #cbd5e1;
+  border: 1px solid #253551;
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.78rem;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.modal.modern.assessment-delete-modal {
+  width: min(440px, calc(100vw - 32px));
+  background: #17233a;
+  border: 1px solid #253551;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  color: #f8fbff;
+}
+
+.assessment-delete-modal h3 {
+  margin: 0 0 12px;
+  color: #f87171;
+}
+
+.assessment-delete-modal p {
+  margin: 0 0 20px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+#root .assessment-delete-modal .assessment-delete-confirm-btn {
+  background: #dc2626 !important;
+  border-color: #ef4444 !important;
+  color: #fff !important;
+}
+
+#root .assessment-delete-modal .assessment-delete-confirm-btn:hover:not(:disabled) {
+  background: #b91c1c !important;
+  border-color: #dc2626 !important;
 }
 
 .assessment-log-response-toggle {
@@ -1544,7 +1712,7 @@
   line-clamp: unset;
 }
 
-.assessment-log-response-expand-btn {
+#root .assessment-logs-modal .assessment-log-response-expand-btn {
   flex: 0 0 24px;
   display: inline-flex;
   align-items: center;
@@ -1553,17 +1721,17 @@
   height: 24px;
   margin-top: 4px;
   padding: 0;
-  border: 0;
+  border: 0 !important;
   border-radius: 4px;
-  background: transparent;
-  color: #475569;
+  background: transparent !important;
+  color: #94a3b8 !important;
   font-size: 0.72rem;
   cursor: pointer;
 }
 
-.assessment-log-response-expand-btn:hover {
-  background: #e2e8f0;
-  color: #1d4ed8;
+#root .assessment-logs-modal .assessment-log-response-expand-btn:hover {
+  background: #253551 !important;
+  color: #7dd3fc !important;
 }
 
 .assessment-log-response-expand-btn:focus-visible {
@@ -1759,30 +1927,6 @@
   .patient-answers-table td:first-child {
     width: auto;
   }
-}
-
-.remove-assessment-btn {
-  background: #dc2626 !important;
-  color: #fff !important;
-  border: 1px solid #991b1b;
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-  cursor: pointer;
-  opacity: 1;
-  visibility: visible;
-}
-
-.remove-assessment-btn:hover {
-  background: #b91c1c !important;
-}
-
-.remove-assessment-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .nested-row {

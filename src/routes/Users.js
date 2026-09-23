@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Eye, Pencil } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import "./Users.css"; // you can reuse Patients.css with tweaks
 import UserModal from "./UserModal";
@@ -368,24 +369,30 @@ const Users = () => {
                 </td>
                 <td className="actions">
                   <button
+                    type="button"
+                    className="user-row-icon-btn user-row-view-icon-btn"
                     title="View Details"
+                    aria-label="View details"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedUser(u);
                       setModalMode("view");
                     }}
                   >
-                    👁
+                    <Eye strokeWidth={1.75} />
                   </button>
                   <button
+                    type="button"
+                    className="user-row-icon-btn user-row-edit-icon-btn"
                     title="Edit User"
+                    aria-label="Edit user"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedUser(u);
                       setModalMode("edit");
                     }}
                   >
-                    ✏️
+                    <Pencil strokeWidth={1.75} />
                   </button>
                 </td>
               </tr>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FaEdit } from "react-icons/fa";
+import { Eye, Pencil } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { apiRequest } from "../api";
 import "./Companies.css";
@@ -663,24 +664,30 @@ const Companies = () => {
                 </td>
                 <td className="actions">
                   <button
+                    type="button"
+                    className="company-row-icon-btn company-row-view-icon-btn"
                     title="View Details"
+                    aria-label="View details"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedCompany(c);
                       setModalMode("view");
                     }}
                   >
-                    👁
+                    <Eye strokeWidth={1.75} />
                   </button>
                   <button
+                    type="button"
+                    className="company-row-icon-btn company-row-edit-icon-btn"
                     title="Edit Company"
+                    aria-label="Edit company"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedCompany(c);
                       setModalMode("edit");
                     }}
                   >
-                    ✏️
+                    <Pencil strokeWidth={1.75} />
                   </button>
                 </td>
               </tr>

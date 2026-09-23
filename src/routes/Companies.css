@@ -172,11 +172,38 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .companies-page td.actions button {
   margin-right: 0;
+}
+
+#root .companies-page td.actions .company-row-icon-btn,
+#root .companies-page td.actions .company-row-icon-btn:hover:not(:disabled) {
+  appearance: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root .companies-page td.actions .company-row-icon-btn svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+#root .companies-page td.actions .company-row-view-icon-btn {
+  color: #38bdf8 !important;
+}
+
+#root .companies-page td.actions .company-row-edit-icon-btn {
+  color: #fbbf24 !important;
 }
 
 .modal-overlay {

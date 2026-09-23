@@ -215,6 +215,37 @@
   margin-right: 0;
 }
 
+.users-page td.actions .user-row-icon-btn + .user-row-icon-btn {
+  margin-left: 10px;
+}
+
+#root .users-page td.actions .user-row-icon-btn,
+#root .users-page td.actions .user-row-icon-btn:hover:not(:disabled) {
+  appearance: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root .users-page td.actions .user-row-icon-btn svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+#root .users-page td.actions .user-row-view-icon-btn {
+  color: #38bdf8 !important;
+}
+
+#root .users-page td.actions .user-row-edit-icon-btn {
+  color: #fbbf24 !important;
+}
+
 .users-col-center {
   text-align: center !important;
 }
@@ -588,6 +619,11 @@
 
 .user-type-edit-button:hover {
   background: #eff6ff;
+}
+
+#root button.user-type-edit-button svg {
+  width: 18px;
+  height: 18px;
 }
 
 .user-profile-meta-value select {
