@@ -10,12 +10,9 @@ import {
   FaClipboardCheck,
   FaExclamationCircle,
   FaLightbulb,
-  FaMapMarkerAlt,
-  FaPhoneAlt,
   FaRegCircle,
   FaShieldAlt,
   FaStethoscope,
-  FaUserMd,
 } from "react-icons/fa";
 
 const pageStyle = {
@@ -954,7 +951,6 @@ function TimelineGroup({ group }) {
                 pill && typeof pill === "object" ? String(pill?.subLabel ?? "").trim() : "";
               const isNewlyHighlighted = Boolean(group.newHighlightedPillSet?.has(pillLabel));
               const isValueIncreaseHighlighted = Boolean(group.increaseHighlightedPillSet?.has(pillLabel));
-              const isHighlighted = isNewlyHighlighted || isValueIncreaseHighlighted;
               const background = isNewlyHighlighted
                 ? "rgba(251, 191, 36, 0.18)"
                 : isValueIncreaseHighlighted

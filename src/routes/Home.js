@@ -25,18 +25,18 @@ function Home() {
 
   const allCards = [
     {
-      title: "Assessments",
-      description: "Create, organize, and manage clinical assessments.",
-      path: "/assessments",
-      icon: FaClipboardList,
-      eyebrow: "Clinical library",
-    },
-    {
       title: "Patients",
       description: "Manage patient records, treatment plans, and assessment progress.",
       path: "/patients",
       icon: FaUserInjured,
       eyebrow: "Patient operations",
+    },
+    {
+      title: "Users",
+      description: "Manage portal access, roles, and company assignments.",
+      path: "/users",
+      icon: FaUsers,
+      eyebrow: "Access management",
     },
     {
       title: "Companies",
@@ -46,11 +46,11 @@ function Home() {
       eyebrow: "Organizations",
     },
     {
-      title: "Users",
-      description: "Manage portal access, roles, and company assignments.",
-      path: "/users",
-      icon: FaUsers,
-      eyebrow: "Access management",
+      title: "Assessments",
+      description: "Create, organize, and manage clinical assessments.",
+      path: "/assessments",
+      icon: FaClipboardList,
+      eyebrow: "Clinical library",
     },
   ];
 

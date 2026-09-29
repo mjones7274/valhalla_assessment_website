@@ -45,6 +45,58 @@ const LANGUAGES_API = `${API_BASE}/api/languages/`;
 const INTEGRATION_OPTIONS_API = `${API_BASE}/api/integration-options/`;
 const BODYIQ_SEND_ORDER_API = `${API_BASE}/api/integrations/bodyiq/send-order/`;
 
+const parseAttemptLogJson = (value) => {
+  if (value && typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue.startsWith("{") && !trimmedValue.startsWith("[")) return null;
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return null;
+  }
+};
+
+const renderHighlightedJson = (value) => {
+  const jsonText = JSON.stringify(value, null, 2);
+  const tokenPattern = /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"\s*:)|("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*")|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  const renderedTokens = [];
+  let lastIndex = 0;
+  let tokenMatch;
+
+  while ((tokenMatch = tokenPattern.exec(jsonText)) !== null) {
+    if (tokenMatch.index > lastIndex) {
+      renderedTokens.push(jsonText.slice(lastIndex, tokenMatch.index));
+    }
+
+    const token = tokenMatch[0];
+    const tokenClass = tokenMatch[1]
+      ? "assessment-log-json-key"
+      : tokenMatch[2]
+        ? "assessment-log-json-string"
+        : tokenMatch[3]
+          ? "assessment-log-json-boolean"
+          : tokenMatch[4]
+            ? "assessment-log-json-null"
+            : "assessment-log-json-number";
+
+    renderedTokens.push(
+      <span className={tokenClass} key={`${tokenMatch.index}-${tokenClass}`}>
+        {token}
+      </span>
+    );
+    lastIndex = tokenPattern.lastIndex;
+  }
+
+  if (lastIndex < jsonText.length) {
+    renderedTokens.push(jsonText.slice(lastIndex));
+  }
+
+  return renderedTokens;
+};
+
 const US_STATES = [
   { value: "AL", label: "Alabama" },
   { value: "AK", label: "Alaska" },
@@ -1601,7 +1653,16 @@ const Patients = () => {
                   style={{ cursor: "pointer" }}
                 >
                   <td>{p.patient_id}</td>
-                  <td>{p.company_patient_id || "—"}</td>
+                  <td>
+                    <span className="patient-company-id-with-test-badge">
+                      <span>{p.company_patient_id || "—"}</span>
+                      {p.test_mode === true && (
+                        <span className="patient-test-mode-badge" title="Test patient">
+                          DEV
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td>{p.first_name}</td>
                   <td>{p.last_name}</td>
                   <td>{p.email}</td>
@@ -1683,7 +1744,8 @@ const Patients = () => {
       {modalMode && (
         modalMode === "add" ? (
             <AddPatientModal
-          restrictedCompanyId={isCompanyRestrictedUser ? selectedCompanyId : null}
+            restrictedCompanyId={isCompanyRestrictedUser ? selectedCompanyId : null}
+            canManageTestMode={userTypeId > 1}
             onClose={() => setModalMode(null)}
             onCreated={(newPatient) => {
                 setPatients((prev) => [...prev, newPatient]);
@@ -1694,6 +1756,7 @@ const Patients = () => {
             <PatientModal
             patient={selectedPatient}
             mode={modalMode}
+            canManageTestMode={userTypeId > 1}
             onClose={() => setModalMode(null)}
             onUpdated={(updatedPatient) => {
               setPatients((prev) =>
@@ -1725,7 +1788,7 @@ export default Patients;
    Modal Component
 ---------------------------------- */
 
-const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
+const PatientModal = ({ patient, mode, canManageTestMode, onClose, onUpdated }) => {
   const isEdit = mode === "edit";
 
   const [firstName, setFirstName] = useState(patient?.first_name || "");
@@ -1740,6 +1803,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const [isActive, setIsActive] = useState(
     patient ? patient.is_active : false
   );
+  const [testMode, setTestMode] = useState(Boolean(patient?.test_mode));
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState(
     String(
@@ -1834,6 +1898,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
       setDob(patient.dob || "");
       setPatientTypeId(patient.patient_type?.patient_type_id || "");
       setIsActive(patient.is_active);
+      setTestMode(Boolean(patient.test_mode));
       setPhones(Array.isArray(patient.phones) ? patient.phones : []);
       setInitialPersistedPhoneIds(
         Array.from(
@@ -2468,6 +2533,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
         dob,
         patient_type_id: patientTypeId ? Number(patientTypeId) : null,
         is_active: isActive,
+        test_mode: testMode,
         company_patient_id: companyPatientId || null,
         preferred_language_code: preferredLanguageCode || null,
       };
@@ -2494,6 +2560,7 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
       const updatedPatient = {
         ...updatedPatientResponse,
         middle_name: updatedPatientResponse?.middle_name ?? middleName,
+        test_mode: Boolean(updatedPatientResponse?.test_mode),
       };
 
       const relationCandidates = getPatientRelationCandidates(patient.patient_id);
@@ -3426,6 +3493,21 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
                 </div>
               )}
           </div>
+
+          {canManageTestMode && (
+            <div className="patient-test-mode-field">
+              <label htmlFor={`patient-test-mode-${patient.patient_id}`}>
+                <span>Point this patient to the DEV Environment</span>
+                <input
+                  id={`patient-test-mode-${patient.patient_id}`}
+                  type="checkbox"
+                  checked={testMode}
+                  disabled={!isEdit}
+                  onChange={(event) => setTestMode(event.target.checked)}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="modal-actions">
@@ -3908,7 +3990,12 @@ const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   );
 };
 
-const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => {
+const AddPatientModal = ({
+  onClose,
+  onCreated,
+  restrictedCompanyId = null,
+  canManageTestMode,
+}) => {
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -3920,6 +4007,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
   const [languages, setLanguages] = useState([]);
   const [preferredLanguageCode, setPreferredLanguageCode] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [testMode, setTestMode] = useState(false);
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
@@ -4279,6 +4367,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
             dob,
             patient_type_id: patientTypeId,
             is_active: isActive,
+            test_mode: testMode,
             company_patient_id: companyPatientId || null,
             preferred_language_code: preferredLanguageCode || null,
           }),
@@ -4385,6 +4474,7 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
       const patientWithCompany = {
         ...patient,
         middle_name: patient?.middle_name ?? middleName,
+        test_mode: Boolean(patient?.test_mode),
         phones,
         addresses,
         companies: company
@@ -4784,6 +4874,20 @@ const AddPatientModal = ({ onClose, onCreated, restrictedCompanyId = null }) => 
                 </div>
               )}
           </div>
+
+          {canManageTestMode && (
+            <div className="patient-test-mode-field">
+              <label htmlFor="new-patient-test-mode">
+                <span>Point this patient to the DEV Environment</span>
+                <input
+                  id="new-patient-test-mode"
+                  type="checkbox"
+                  checked={testMode}
+                  onChange={(event) => setTestMode(event.target.checked)}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="modal-actions">
@@ -5455,11 +5559,10 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
   const handleDownloadGeneratedReportPdf = useCallback(async () => {
     const isInvoicePreview = selectedGeneratedPreviewType === "invoice";
-    const isStoredReportPreview = selectedGeneratedPreviewType === "stored-report";
 
     if (isDownloadingGeneratedReport) return;
 
-    if (isStoredReportPreview && selectedReportDocumentUrl) {
+    if (!isInvoicePreview && selectedReportDocumentUrl) {
       setIsDownloadingGeneratedReport(true);
 
       try {
@@ -6261,9 +6364,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     }
 
     if (field === "response") {
-      const responseText = typeof value === "object"
-        ? JSON.stringify(value, null, 2)
-        : String(value);
+      const parsedJson = parseAttemptLogJson(value);
       const isExpanded = expandedAttemptLogRows.has(rowKey);
 
       return (
@@ -6290,13 +6391,19 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
           >
             {isExpanded ? <FaChevronDown /> : <FaChevronRight />}
           </button>
-          <pre className="assessment-log-json">{responseText}</pre>
+          <pre className="assessment-log-json">
+            <code>{parsedJson === null ? String(value) : renderHighlightedJson(parsedJson)}</code>
+          </pre>
         </div>
       );
     }
 
     if (typeof value === "object") {
-      return <pre className="assessment-log-json">{JSON.stringify(value, null, 2)}</pre>;
+      return (
+        <pre className="assessment-log-json">
+          <code>{renderHighlightedJson(value)}</code>
+        </pre>
+      );
     }
 
     return String(value);
@@ -7124,7 +7231,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         const locationPath = String(latestReportDocument?.location ?? "").split("?")[0];
         const documentName = decodeURIComponent(locationPath.split("/").pop() || "assessment-report.pdf");
 
-        setSelectedGeneratedPreviewType("stored-report");
+        setSelectedGeneratedPreviewType("report");
         setSelectedReportAttempt(attempt);
         setSelectedReportFields(reportFields);
         setSelectedReportHtml("");
@@ -7259,7 +7366,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         throw new Error("Document download response did not include document_url.");
       }
 
-      setSelectedGeneratedPreviewType("stored-report");
+      setSelectedGeneratedPreviewType("report");
       setSelectedReportAttempt(attempt);
       setSelectedReportFields(reportFields);
       setSelectedReportHtml("");
@@ -7553,7 +7660,17 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                       </div>
 
                       <div className="assessment-card-meta">
-                        <div className={`assessment-status-row ${isCompleted ? "completed-layout" : ""}`}>
+                        <div
+                          className={`assessment-status-row ${
+                            isCompleted
+                              ? "completed-layout"
+                              : statusKey === "in_progress"
+                                ? "in-progress-layout"
+                                : statusKey === "assigned"
+                                  ? "assigned-layout"
+                                : ""
+                          }`}
+                        >
                           <span className="assessment-status-group">
                             <strong>Status:</strong>
                             <span
@@ -7597,8 +7714,13 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               </span>
                             </span>
                           )}
+                          {(statusKey === "in_progress" || statusKey === "assigned") && tokenExpirationText && (
+                            <span className="assessment-token-expiration">
+                              <strong>Link Expires On:</strong> {tokenExpirationText}
+                            </span>
+                          )}
                         </div>
-                        {tokenExpirationText && (
+                        {statusKey !== "in_progress" && statusKey !== "assigned" && tokenExpirationText && (
                           <div className="assessment-token-expiration">
                             <strong>Link Expires On:</strong> {tokenExpirationText}
                           </div>
@@ -7621,7 +7743,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "flex-end",
-                              flexWrap: "wrap",
+                              flexWrap: "nowrap",
                               gap: "6px",
                             }}
                           >
@@ -7707,6 +7829,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
         {showGeneratedReportModal && selectedReportFields && (
           <div
+            className="generated-report-overlay"
             style={{
               position: "fixed",
               inset: 0,
@@ -7719,6 +7842,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
             }}
           >
             <div
+              className="generated-report-modal"
               style={{
                 width: "min(1280px, 100%)",
                 height: "min(92vh, 980px)",
@@ -7732,6 +7856,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
               }}
             >
               <div
+                className="generated-report-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -7742,15 +7867,16 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 800, color: "#0f172a" }}>
+                  <div className="generated-report-title" style={{ fontWeight: 800, color: "#0f172a" }}>
                     {selectedGeneratedPreviewType === "invoice" ? "Generated Invoice" : "Generated Report"}
                   </div>
-                  <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                  <div className="generated-report-subtitle" style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
                     {`${getAssessmentName(selectedReportAttempt)} - ${patientName || patient?.email || "Patient"}`}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                   <button
+                    className="generated-report-download-btn"
                     onClick={handleDownloadGeneratedReportPdf}
                     disabled={isDownloadingGeneratedReport}
                     style={{
@@ -7766,6 +7892,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                     {isDownloadingGeneratedReport ? "Generating PDF..." : "Download PDF"}
                   </button>
                   <button
+                    className="generated-report-close-btn"
                     onClick={() => {
                       setShowGeneratedReportModal(false);
                       setSelectedReportAttempt(null);
@@ -7789,7 +7916,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, overflow: "auto" }}>
+              <div className="generated-report-body" style={{ flex: 1, overflow: "auto" }}>
                 <div
                   ref={generatedReportRef}
                   style={
@@ -7806,9 +7933,9 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                       invoiceNumber={selectedReportFields?.invoiceNumber}
                       assessmentDate={selectedReportFields?.assessmentDate}
                     />
-                  ) : selectedGeneratedPreviewType === "stored-report" ? (
+                  ) : selectedGeneratedPreviewType === "report" ? (
                     <iframe
-                      title="Stored report preview"
+                      title="Generated report PDF preview"
                       src={selectedReportDocumentUrl}
                       style={{
                         width: "100%",
@@ -7970,14 +8097,27 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                       <tbody>
                         {attemptLogs.map((log, index) => {
                           const rowKey = log?.patient_assessment_log_id ?? `assessment-log-${index}`;
+                          const isResponseExpanded = expandedAttemptLogRows.has(rowKey);
 
                           return (
-                            <tr key={rowKey}>
-                              {attemptLogColumns.map((field) => (
-                                <td key={field} className={`assessment-log-field-${field}`}>
-                                  {renderAttemptLogValue(field, log?.[field], rowKey)}
+                            <tr
+                              key={rowKey}
+                              className={isResponseExpanded ? "assessment-log-row-expanded" : undefined}
+                            >
+                              {isResponseExpanded ? (
+                                <td
+                                  className="assessment-log-expanded-response"
+                                  colSpan={attemptLogColumns.length}
+                                >
+                                  {renderAttemptLogValue("response", log?.response, rowKey)}
                                 </td>
-                              ))}
+                              ) : (
+                                attemptLogColumns.map((field) => (
+                                  <td key={field} className={`assessment-log-field-${field}`}>
+                                    {renderAttemptLogValue(field, log?.[field], rowKey)}
+                                  </td>
+                                ))
+                              )}
                             </tr>
                           );
                         })}

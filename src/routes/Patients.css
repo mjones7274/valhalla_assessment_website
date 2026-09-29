@@ -131,6 +131,28 @@
   background: #f8fbff;
 }
 
+.patient-company-id-with-test-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.patient-test-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .patients-table-skeleton-row {
   pointer-events: none;
 }
@@ -1580,6 +1602,34 @@
   text-align: left;
 }
 
+.assessment-status-row.in-progress-layout {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 12px;
+}
+
+.assessment-status-row.in-progress-layout .assessment-progress-inline {
+  justify-self: start;
+  margin-left: 0;
+}
+
+.assessment-status-row.in-progress-layout .assessment-token-expiration {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.assessment-status-row.assigned-layout {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 12px;
+}
+
+.assessment-status-row.assigned-layout .assessment-token-expiration {
+  grid-column: 3;
+  justify-self: end;
+  white-space: nowrap;
+}
+
 .patient-assessments-modal .assessment-card-meta strong,
 .patient-assessments-modal .assessment-card-event strong {
   color: #1d4ed8;
@@ -1689,21 +1739,30 @@
 }
 
 .assessment-card-footer .assessment-card-event {
+  flex: 1 1 auto;
+  min-width: 0;
   margin-bottom: 0;
+  overflow-wrap: anywhere;
 }
 
 .assessment-card-actions {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-left: auto;
 }
 
 .patient-assessments-modal .assessment-card-actions {
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+}
+
+.patient-assessments-modal .assessment-card-actions > div {
+  flex-wrap: nowrap !important;
 }
 
 .patient-assessments-modal .assessment-card-actions .assessments-action-btn {
@@ -1782,6 +1841,60 @@
 .patient-assessments-modal .skeleton-line {
   background: linear-gradient(90deg, #1e2c46 25%, #2b3d5d 37%, #1e2c46 63%);
   background-size: 400% 100%;
+}
+
+.generated-report-overlay {
+  background: rgba(3, 7, 18, 0.78) !important;
+  backdrop-filter: blur(3px);
+}
+
+.generated-report-modal {
+  background: var(--theme-page-background) !important;
+  border: 1px solid var(--theme-card-border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.46) !important;
+  color: var(--theme-text-primary);
+}
+
+.generated-report-header {
+  background: #0f1a2d !important;
+  border-bottom-color: var(--theme-card-border) !important;
+}
+
+.generated-report-title {
+  color: var(--theme-text-primary) !important;
+}
+
+.generated-report-subtitle {
+  color: var(--theme-text-muted) !important;
+}
+
+.generated-report-body {
+  background: #0b1220;
+}
+
+#root .generated-report-download-btn {
+  border-color: #0ea5e9 !important;
+  background: #0ea5e9 !important;
+  color: #06111f !important;
+}
+
+#root .generated-report-download-btn:hover:not(:disabled) {
+  border-color: #38bdf8 !important;
+  background: #38bdf8 !important;
+  color: #06111f !important;
+}
+
+#root .generated-report-close-btn {
+  border-color: #334766 !important;
+  background: #17233a !important;
+  color: #dbeafe !important;
+}
+
+#root .generated-report-close-btn:hover:not(:disabled) {
+  border-color: #4b6387 !important;
+  background: #1e2c46 !important;
+  color: #f8fbff !important;
 }
 
 .modal.modern.patient-answers-modal {
@@ -1923,15 +2036,41 @@
 .assessment-log-json {
   min-width: 280px;
   margin: 0;
-  padding: 8px;
+  padding: 10px 12px;
   border-radius: 6px;
-  background: #0f1a2d;
-  color: #cbd5e1;
-  border: 1px solid #253551;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border: 1px solid #3c3c3c;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 0.78rem;
-  line-height: 1.45;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  tab-size: 2;
   white-space: pre-wrap;
+}
+
+.assessment-log-json code {
+  font: inherit;
+  color: inherit;
+}
+
+.assessment-log-json-key {
+  color: #9cdcfe;
+}
+
+.assessment-log-json-string {
+  color: #ce9178;
+}
+
+.assessment-log-json-number {
+  color: #b5cea8;
+}
+
+.assessment-log-json-boolean {
+  color: #569cd6;
+}
+
+.assessment-log-json-null {
+  color: #c586c0;
 }
 
 .modal.modern.assessment-delete-modal {
@@ -1969,6 +2108,17 @@
   align-items: flex-start;
   gap: 6px;
   width: 100%;
+}
+
+.assessment-logs-table td.assessment-log-expanded-response {
+  padding: 14px;
+  background: #0f1a2d;
+}
+
+.assessment-log-expanded-response .assessment-log-json {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .assessment-log-response-toggle .assessment-log-json {
@@ -2540,6 +2690,59 @@
 .patient-profile-layout .events-section-full-width .events-table-wrap,
 .patient-profile-layout .events-section-full-width .user-address-add-btn {
   margin-left: 0;
+}
+
+.patient-test-mode-field {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  border: 1px solid #253551;
+  border-radius: 8px;
+  background: #121c2e;
+}
+
+.patient-test-mode-field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #dbeafe;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.patient-test-mode-field input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid #64748b;
+  border-radius: 4px;
+  background: #121c2e;
+  cursor: pointer;
+}
+
+.patient-test-mode-field input[type="checkbox"]:checked {
+  border-color: #38bdf8;
+  background-color: #38bdf8;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%230f172a' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.25' d='m3.25 8.25 3 3 6.5-6.5'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 14px 14px;
+}
+
+.patient-test-mode-field input[type="checkbox"]:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.45);
+  outline-offset: 2px;
+}
+
+.patient-test-mode-field input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.patient-test-mode-field label:has(input:disabled) {
+  cursor: default;
 }
 
 .modal-overlay:has(.patient-modal) {
