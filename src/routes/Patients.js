@@ -2843,6 +2843,17 @@ const PatientModal = ({ patient, mode, canManageTestMode, onClose, onUpdated }) 
   const handleOrderSupplementNow = async () => {
     setSupplementOrderSaveError("");
 
+    const orderingCompany = companies.find(
+      (company) => Number(company?.company_id ?? company?.id ?? 0) === Number(companyId)
+    );
+
+    if (orderingCompany?.enable_ordering !== true) {
+      setSupplementOrderSaveError(
+        "Ordering is disabled for this company. Please contact a Valhalla administrator to enable it."
+      );
+      return;
+    }
+
     const selectedAddress = addresses.find(
       (address) => String(getAddressRowKey(address) || "") === selectedShippingAddressKey
     );
@@ -8195,4 +8206,3 @@ const Detail = ({ label, children, className = "", style = undefined }) => (
     <div className="detail-value">{children}</div>
   </div>
 );
-
