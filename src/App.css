@@ -1272,6 +1272,7 @@ body,
 .deployment-environment-pill {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   padding: 6px 9px;
   border: 1px solid rgba(248, 113, 113, 0.45);
   border-radius: 999px;
@@ -1282,10 +1283,6 @@ body,
   line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.deployment-environment-pill-mobile {
-  display: none;
 }
 
 .header-account-pill {
@@ -1568,9 +1565,6 @@ body,
     display: inline-flex;
   }
 
-  .deployment-environment-pill-mobile {
-    display: inline-flex;
-  }
 }
 
 @media screen and (max-width: 600px) {

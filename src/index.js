@@ -90,6 +90,7 @@ const canAccessPath = (userTypeId, pathname) => {
 const AppHeader = ({ loggedIn, setLoggedIn, user }) => {
   const userTypeId = getUserTypeId(user);
   const showApiUrl = process.env.NODE_ENV === "development";
+  const environmentLabel = process.env.REACT_APP_ENVIRONMENT_LABEL?.trim();
   const selectedCompany = loggedIn ? getSelectedCompany() : null;
   const selectedCompanyName =
     selectedCompany?.company_name ?? selectedCompany?.name ?? "";
@@ -108,6 +109,9 @@ const AppHeader = ({ loggedIn, setLoggedIn, user }) => {
             <h1 className="header-title">Valhalla TBI Portal</h1>
             <p className="header-subtitle">Clinical TBI Assessments</p>
           </div>
+          {environmentLabel && (
+            <span className="deployment-environment-pill">{environmentLabel}</span>
+          )}
           {showApiUrl && (
             <span className="header-api-url" title={process.env.REACT_APP_API_URL_BASE}>
               Development
