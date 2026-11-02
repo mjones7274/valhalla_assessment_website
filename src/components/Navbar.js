@@ -14,6 +14,7 @@ const getUserTypeId = (user) =>
 function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompany }) {
   const [sidebar, setSidebar] = useState(false);
   const navigate = useNavigate();
+  const environmentLabel = process.env.REACT_APP_ENVIRONMENT_LABEL?.trim();
 
   const showSidebar = () => setSidebar((isOpen) => !isOpen);
   const closeSidebar = () => setSidebar(false);
@@ -81,6 +82,12 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
           <span className="api-test-mode-pill api-test-mode-pill-mobile">API Test Mode</span>
         )}
 
+        {loggedIn && environmentLabel && (
+          <span className="deployment-environment-pill deployment-environment-pill-mobile">
+            {environmentLabel}
+          </span>
+        )}
+
         <nav className="top-nav-links" aria-label="Primary navigation">
           <div className="top-nav-links-left">
             {topNavItems.map((item, index) => {
@@ -100,6 +107,10 @@ function Navbar({ loggedIn, setLoggedIn, user, headerAccountLabel, selectedCompa
               );
             })}
           </div>
+
+          {environmentLabel && (
+            <span className="deployment-environment-pill">{environmentLabel}</span>
+          )}
 
           {loggedIn && user && (
             <div className="top-nav-links-right">

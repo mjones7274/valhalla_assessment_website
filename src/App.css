@@ -1269,6 +1269,25 @@ body,
   font-weight: 700;
 }
 
+.deployment-environment-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 999px;
+  background: rgba(185, 28, 28, 0.22);
+  color: #fecaca;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.deployment-environment-pill-mobile {
+  display: none;
+}
+
 .header-account-pill {
   display: flex;
   align-items: center;
@@ -1546,6 +1565,10 @@ body,
   }
 
   .api-test-mode-pill-mobile {
+    display: inline-flex;
+  }
+
+  .deployment-environment-pill-mobile {
     display: inline-flex;
   }
 }

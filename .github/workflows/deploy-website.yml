@@ -2,13 +2,18 @@ name: Deploy Build Folder to S3 on Change
 
 on:
   push:
+    branches:
+      - main
+      - development
     paths:
-      - 'build/**'    # Run only if build folder changes
+      - 'build/**'
       - '.github/workflows/deploy-website.yml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
 
     steps:
       - name: Checkout code
