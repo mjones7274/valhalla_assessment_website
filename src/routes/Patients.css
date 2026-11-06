@@ -1566,7 +1566,7 @@
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .patient-assessments-modal .assessment-status-group {
@@ -1597,11 +1597,6 @@
   justify-self: center;
 }
 
-.assessment-status-row.completed-layout .assessment-completed-date {
-  justify-self: end;
-  text-align: left;
-}
-
 .assessment-status-row.in-progress-layout {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
@@ -1613,20 +1608,59 @@
   margin-left: 0;
 }
 
-.assessment-status-row.in-progress-layout .assessment-token-expiration {
-  justify-self: end;
-  white-space: nowrap;
-}
-
 .assessment-status-row.assigned-layout {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
   gap: 12px;
 }
 
-.assessment-status-row.assigned-layout .assessment-token-expiration {
+.assessment-status-row.completed-layout .assessment-card-dates,
+.assessment-status-row.in-progress-layout .assessment-card-dates,
+.assessment-status-row.assigned-layout .assessment-card-dates {
   grid-column: 3;
   justify-self: end;
+  margin-left: 0;
+}
+
+#root .patient-assessments-modal .assessment-card-meta .assessment-card-dates {
+  display: inline-grid;
+  grid-template-columns: max-content max-content;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 3px;
+  margin-left: auto;
+  margin-bottom: 0;
+  color: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+#root .patient-assessments-modal .assessment-card-meta .assessment-card-date-row {
+  display: contents;
+  margin-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+#root .patient-assessments-modal .assessment-card-meta .assessment-card-date-row strong {
+  display: inline;
+  color: #7dd3fc;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+#root .patient-assessments-modal .assessment-card-meta .assessment-card-date-value {
+  display: inline;
+  margin-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  text-transform: none;
   white-space: nowrap;
 }
 
@@ -1710,13 +1744,27 @@
   border-radius: 999px;
 }
 
-.patient-assessments-modal .assessment-progress-text {
+#root .patient-assessments-modal .assessment-progress-link,
+#root .patient-assessments-modal .assessment-progress-link:hover:not(:disabled) {
   display: inline;
-  margin-bottom: 0;
+  margin: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #7dd3fc !important;
   font-size: 0.78rem;
-  color: #374151;
-  font-weight: 400;
+  font-weight: 600 !important;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   text-transform: none;
+  white-space: nowrap;
+}
+
+#root .patient-assessments-modal .assessment-progress-link:hover:not(:disabled) {
+  color: #bae6fd !important;
 }
 
 .assessment-card-event {
@@ -1931,6 +1979,34 @@
   color: #f8fbff;
 }
 
+.modal.modern.assessment-email-history-modal {
+  width: min(820px, calc(100vw - 40px));
+}
+
+.modal.modern.assessment-current-question-modal {
+  width: min(640px, calc(100vw - 40px));
+}
+
+.assessment-current-question-content {
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+
+.assessment-current-question-title {
+  color: #f8fbff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.assessment-current-question-verbiage {
+  color: #dbeafe;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .modal-overlay:has(.assessment-logs-modal),
 .assessment-delete-overlay {
   background: rgba(3, 7, 18, 0.72);
@@ -2025,7 +2101,19 @@
 
 .assessment-logs-table td.assessment-log-field-timestamp,
 .assessment-logs-table td.assessment-log-field-api_call,
-.assessment-logs-table td.assessment-log-field-type {
+.assessment-logs-table td.assessment-log-field-type,
+.assessment-email-history-table td.assessment-email-history-type,
+.assessment-email-history-table td.assessment-email-history-date {
+  white-space: nowrap;
+}
+
+.assessment-email-history-recipients {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+}
+
+.assessment-email-history-recipient {
   white-space: nowrap;
 }
 
@@ -2692,59 +2780,6 @@
   margin-left: 0;
 }
 
-.patient-test-mode-field {
-  grid-column: 1 / -1;
-  padding: 12px 14px;
-  border: 1px solid #253551;
-  border-radius: 8px;
-  background: #121c2e;
-}
-
-.patient-test-mode-field label {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: #dbeafe;
-  font-size: 0.92rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.patient-test-mode-field input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  border: 1px solid #64748b;
-  border-radius: 4px;
-  background: #121c2e;
-  cursor: pointer;
-}
-
-.patient-test-mode-field input[type="checkbox"]:checked {
-  border-color: #38bdf8;
-  background-color: #38bdf8;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%230f172a' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.25' d='m3.25 8.25 3 3 6.5-6.5'/%3E%3C/svg%3E");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 14px 14px;
-}
-
-.patient-test-mode-field input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.45);
-  outline-offset: 2px;
-}
-
-.patient-test-mode-field input[type="checkbox"]:disabled {
-  cursor: default;
-  opacity: 0.75;
-}
-
-.patient-test-mode-field label:has(input:disabled) {
-  cursor: default;
-}
-
 .modal-overlay:has(.patient-modal) {
   background: rgba(3, 7, 18, 0.72);
   backdrop-filter: blur(3px);
@@ -2846,5 +2881,3 @@
     grid-template-columns: 1fr;
   }
 }
-
-

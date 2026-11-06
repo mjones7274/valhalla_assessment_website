@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { FaChevronDown, FaChevronRight, FaSyncAlt, FaTrash } from "react-icons/fa";
-import { Eye, List, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Eye, List, Mail, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import CognitrackXInvoice from "./CognitrackXInvoice";
@@ -27,6 +27,7 @@ const PATIENT_ASSESSMENT_ATTEMPTS_API = `${API_BASE}/api/patient-assessment-atte
 const PATIENT_ATTEMPT_PROGRESS_API = `${API_BASE}/api/patient-attempt-progress/`;
 const PATIENT_RESPONSES_HISTORY_API = `${API_BASE}/api/patient-responses-history/`;
 const PATIENT_ASSESSMENT_LOGS_API = `${API_BASE}/api/patient-assessment-logs`;
+const PATIENT_ASSESSMENT_EMAIL_HISTORY_API = `${API_BASE}/api/patient-assessment-email-history/`;
 const PATIENT_DOCUMENTS_API = `${API_BASE}/api/patient-documents/`;
 const DOCUMENT_TYPES_API = `${API_BASE}/api/document-types`;
 const DOCUMENT_UPLOAD_GET_LINK_API = `${API_BASE}/api/document-upload/get-link/`;
@@ -1745,18 +1746,19 @@ const Patients = () => {
         modalMode === "add" ? (
             <AddPatientModal
             restrictedCompanyId={isCompanyRestrictedUser ? selectedCompanyId : null}
-            canManageTestMode={userTypeId > 1}
             onClose={() => setModalMode(null)}
-            onCreated={(newPatient) => {
+            onCreated={(newPatient, { openAssessments = false } = {}) => {
                 setPatients((prev) => [...prev, newPatient]);
                 setModalMode(null);
+                if (openAssessments) {
+                  setAssessmentPatient(newPatient);
+                }
             }}
             />
         ) : (
             <PatientModal
             patient={selectedPatient}
             mode={modalMode}
-            canManageTestMode={userTypeId > 1}
             onClose={() => setModalMode(null)}
             onUpdated={(updatedPatient) => {
               setPatients((prev) =>
@@ -1775,6 +1777,7 @@ const Patients = () => {
         <PatientAssessmentsModal
           patient={assessmentPatient}
           userTypeId={userTypeId}
+          onAssessmentAssigned={loadPatients}
           onClose={() => setAssessmentPatient(null)}
         />
       )}
@@ -1788,7 +1791,7 @@ export default Patients;
    Modal Component
 ---------------------------------- */
 
-const PatientModal = ({ patient, mode, canManageTestMode, onClose, onUpdated }) => {
+const PatientModal = ({ patient, mode, onClose, onUpdated }) => {
   const isEdit = mode === "edit";
 
   const [firstName, setFirstName] = useState(patient?.first_name || "");
@@ -3505,20 +3508,6 @@ const PatientModal = ({ patient, mode, canManageTestMode, onClose, onUpdated }) 
               )}
           </div>
 
-          {canManageTestMode && (
-            <div className="patient-test-mode-field">
-              <label htmlFor={`patient-test-mode-${patient.patient_id}`}>
-                <span>Point this patient to the DEV Environment</span>
-                <input
-                  id={`patient-test-mode-${patient.patient_id}`}
-                  type="checkbox"
-                  checked={testMode}
-                  disabled={!isEdit}
-                  onChange={(event) => setTestMode(event.target.checked)}
-                />
-              </label>
-            </div>
-          )}
         </div>
 
         <div className="modal-actions">
@@ -4005,7 +3994,6 @@ const AddPatientModal = ({
   onClose,
   onCreated,
   restrictedCompanyId = null,
-  canManageTestMode,
 }) => {
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -4018,7 +4006,6 @@ const AddPatientModal = ({
   const [languages, setLanguages] = useState([]);
   const [preferredLanguageCode, setPreferredLanguageCode] = useState("");
   const [isActive, setIsActive] = useState(true);
-  const [testMode, setTestMode] = useState(false);
 
   const useClientTerminology = shouldUseClientTerminology();
   const patientLabels = getPatientLabels(useClientTerminology);
@@ -4084,6 +4071,15 @@ const AddPatientModal = ({
         setCompanyId(String(restrictedId));
       }
       setPatientTypes(patientTypes);
+      const defaultPatientType = patientTypes.find(
+        (patientType) =>
+          String(patientType?.description ?? "").trim().toLowerCase() === "personal injury"
+      );
+      if (defaultPatientType?.patient_type_id != null) {
+        setPatientTypeId((currentValue) =>
+          currentValue || String(defaultPatientType.patient_type_id)
+        );
+      }
       setPhoneTypes(phoneTypeRows);
       setAddressTypes(addressTypeRows);
       setInjuryEventTypes(Array.isArray(injuryEventTypeRows) ? injuryEventTypeRows : []);
@@ -4091,7 +4087,21 @@ const AddPatientModal = ({
 
     apiRequest(LANGUAGES_API)
       .then((res) => res.json())
-      .then((languageRows) => setLanguages(Array.isArray(languageRows) ? languageRows : []))
+      .then((languageRows) => {
+        const availableLanguages = Array.isArray(languageRows) ? languageRows : [];
+        const defaultLanguage = availableLanguages.find(
+          (language) => String(language?.code ?? "").trim().toLowerCase() === "en"
+        ) || availableLanguages.find(
+          (language) => String(language?.name ?? "").trim().toLowerCase() === "english"
+        );
+
+        setLanguages(availableLanguages);
+        if (defaultLanguage?.code) {
+          setPreferredLanguageCode((currentValue) =>
+            currentValue || String(defaultLanguage.code)
+          );
+        }
+      })
       .catch((error) => {
         console.error("Load languages failed", error);
         setLanguages([]);
@@ -4360,7 +4370,7 @@ const AddPatientModal = ({
     setIsDeleteAddressOpen(false);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (openAssessments = false) => {
     setSaving(true);
 
     try {
@@ -4378,7 +4388,7 @@ const AddPatientModal = ({
             dob,
             patient_type_id: patientTypeId,
             is_active: isActive,
-            test_mode: testMode,
+            test_mode: false,
             company_patient_id: companyPatientId || null,
             preferred_language_code: preferredLanguageCode || null,
           }),
@@ -4497,7 +4507,7 @@ const AddPatientModal = ({
           : [],
       };
 
-      onCreated(patientWithCompany);
+      onCreated(patientWithCompany, { openAssessments });
     } catch (err) {
       console.error("Create patient failed", err);
     } finally {
@@ -4886,25 +4896,15 @@ const AddPatientModal = ({
               )}
           </div>
 
-          {canManageTestMode && (
-            <div className="patient-test-mode-field">
-              <label htmlFor="new-patient-test-mode">
-                <span>Point this patient to the DEV Environment</span>
-                <input
-                  id="new-patient-test-mode"
-                  type="checkbox"
-                  checked={testMode}
-                  onChange={(event) => setTestMode(event.target.checked)}
-                />
-              </label>
-            </div>
-          )}
         </div>
 
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={saving} onClick={handleSave}>
+          <button className="primary" disabled={saving} onClick={() => handleSave(false)}>
             {saving ? "Saving..." : `Create ${patientLabels.singular}`}
+          </button>
+          <button className="primary" disabled={saving} onClick={() => handleSave(true)}>
+            {saving ? "Saving..." : "Create & Assign Assessment"}
           </button>
         </div>
 
@@ -5497,7 +5497,12 @@ const PatientPersonModal = ({ companyId, patientId, linkedPersonIds, onClose, on
   );
 };
 
-const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
+const PatientAssessmentsModal = ({
+  patient,
+  userTypeId,
+  onAssessmentAssigned,
+  onClose,
+}) => {
   const [attempts, setAttempts] = useState([]);
   const [tokenExpirationByAttemptId, setTokenExpirationByAttemptId] = useState({});
   const [attemptProgressByAttemptId, setAttemptProgressByAttemptId] = useState({});
@@ -5530,6 +5535,15 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
   const [attemptLogsLoading, setAttemptLogsLoading] = useState(false);
   const [attemptLogsError, setAttemptLogsError] = useState("");
   const [expandedAttemptLogRows, setExpandedAttemptLogRows] = useState(() => new Set());
+  const [showEmailHistoryModal, setShowEmailHistoryModal] = useState(false);
+  const [selectedEmailHistoryAttempt, setSelectedEmailHistoryAttempt] = useState(null);
+  const [emailHistoryRows, setEmailHistoryRows] = useState([]);
+  const [emailHistoryLoading, setEmailHistoryLoading] = useState(false);
+  const [emailHistoryError, setEmailHistoryError] = useState("");
+  const [showCurrentQuestionModal, setShowCurrentQuestionModal] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [currentQuestionLoading, setCurrentQuestionLoading] = useState(false);
+  const [currentQuestionError, setCurrentQuestionError] = useState("");
   const [rotatingTokenAttemptId, setRotatingTokenAttemptId] = useState(null);
   const [showGeneratedReportModal, setShowGeneratedReportModal] = useState(false);
   const [selectedReportAttempt, setSelectedReportAttempt] = useState(null);
@@ -5862,7 +5876,13 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     selectedReportDocumentUrl,
   ]);
 
-  const sendAssessmentLinkEmail = useCallback(async ({ recipientEmail, assessmentLink }) => {
+  const sendAssessmentLinkEmail = useCallback(async ({
+    recipientEmail,
+    assessmentLink,
+    assessmentAttemptId,
+    notes,
+    emailTypeId,
+  }) => {
     const trimmedRecipientEmail = String(recipientEmail || "").trim();
     if (!trimmedRecipientEmail) {
       throw new Error("Patient email is missing.");
@@ -5888,6 +5908,9 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         ? "Su evaluación CogniTrackX está lista – Acción requerida"
         : "Your CogniTrackX Assessment Is Ready – Action Required",
       body_html: emailHtml,
+      ...(assessmentAttemptId ? { assessment_attempt_id: Number(assessmentAttemptId) } : {}),
+      ...(notes ? { notes } : {}),
+      ...(emailTypeId ? { email_type_id: Number(emailTypeId) } : {}),
     };
 
     let response = await apiRequest(SEND_EMAIL_API, {
@@ -6242,6 +6265,24 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     return parsed.toLocaleDateString();
   };
 
+  const renderEmailRecipients = (value) => {
+    const recipients = (Array.isArray(value) ? value : String(value ?? "").split(","))
+      .map((recipient) => String(recipient).trim())
+      .filter(Boolean);
+
+    if (recipients.length === 0) return "—";
+
+    return (
+      <span className="assessment-email-history-recipients">
+        {recipients.map((recipient, index) => (
+          <span className="assessment-email-history-recipient" key={`${recipient}-${index}`}>
+            {recipient}{index < recipients.length - 1 ? "," : ""}
+          </span>
+        ))}
+      </span>
+    );
+  };
+
   const truncateEventLabelWithEllipsis = (label) => {
     const normalized = String(label ?? "");
     return normalized.length > 100 ? `${normalized.slice(0, 100)}...` : normalized;
@@ -6332,6 +6373,80 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       setAttemptLogsError(error?.message || "Failed to load assessment logs.");
     } finally {
       setAttemptLogsLoading(false);
+    }
+  };
+
+  const handleOpenEmailHistory = async (attempt) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) return;
+
+    setSelectedEmailHistoryAttempt(attempt);
+    setEmailHistoryRows([]);
+    setEmailHistoryError("");
+    setEmailHistoryLoading(true);
+    setShowEmailHistoryModal(true);
+
+    try {
+      const response = await apiRequest(
+        `${PATIENT_ASSESSMENT_EMAIL_HISTORY_API}?assessment_attempt=${encodeURIComponent(attemptId)}`
+      );
+
+      if (!response.ok) {
+        const message = await getResponseErrorMessage(response);
+        throw new Error(`Email history request failed: ${message}`);
+      }
+
+      setEmailHistoryRows(normalizeApiRows(await response.json()));
+    } catch (error) {
+      console.error("Failed to load patient assessment email history", error);
+      setEmailHistoryError(error?.message || "Failed to load email history.");
+    } finally {
+      setEmailHistoryLoading(false);
+    }
+  };
+
+  const handleOpenCurrentQuestion = async (attempt) => {
+    const attemptId = Number(getAttemptId(attempt));
+    if (!Number.isFinite(attemptId) || attemptId <= 0) return;
+
+    setCurrentQuestion(null);
+    setCurrentQuestionError("");
+    setCurrentQuestionLoading(true);
+    setShowCurrentQuestionModal(true);
+
+    try {
+      const response = await apiRequest(
+        `${PATIENT_ASSESSMENT_ATTEMPTS_API}${attemptId}/`
+      );
+
+      if (!response.ok) {
+        const message = await getResponseErrorMessage(response);
+        throw new Error(`Current question request failed: ${message}`);
+      }
+
+      const refreshedAttempt = await response.json();
+      const question = refreshedAttempt?.current_question;
+
+      setCurrentQuestion(question ? {
+        title: String(question?.title ?? question?.question_title ?? "").trim(),
+        verbiage: String(
+          question?.question ??
+          question?.question_text ??
+          question?.question_verbiage ??
+          ""
+        ).trim(),
+      } : null);
+
+      setAttempts((prev) => prev.map((attemptRow) =>
+        Number(getAttemptId(attemptRow)) === attemptId
+          ? { ...attemptRow, ...refreshedAttempt }
+          : attemptRow
+      ));
+    } catch (error) {
+      console.error("Failed to load current assessment question", error);
+      setCurrentQuestionError(error?.message || "Failed to load the current question.");
+    } finally {
+      setCurrentQuestionLoading(false);
     }
   };
 
@@ -6761,7 +6876,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
     }
   }, []);
 
-  const handleSendLink = useCallback(async (attempt) => {
+  const handleSendLink = useCallback(async (attempt, emailMetadata = {}) => {
     const status = getAttemptStatus(attempt);
     if (status === "removed" || status === "completed") return;
 
@@ -6776,6 +6891,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       await sendAssessmentLinkEmail({
         recipientEmail: patient?.email,
         assessmentLink,
+        ...emailMetadata,
       });
       showLinkFeedback(attempt, "Success! Link sent");
     } catch (err) {
@@ -6855,6 +6971,9 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       await sendAssessmentLinkEmail({
         recipientEmail: patient?.email,
         assessmentLink: buildAssessmentLink(rotatedToken),
+        assessmentAttemptId: attemptId,
+        notes: "Invitation email sent - Generated new link",
+        emailTypeId: 1,
       });
       showLinkFeedback(attempt, "Success! New link generated and emailed");
     } catch (error) {
@@ -7021,7 +7140,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
   };
 
   const handleAssignAssessment = async () => {
-    if (!selectedAssessmentId || !selectedPatientEventId) return;
+    if (!selectedAssessmentId) return;
 
     setAssigning(true);
     try {
@@ -7067,7 +7186,9 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
         patient_id: patient.patient_id,
         assessment_id: selectedAssessmentNumericId,
         status: "assigned",
-        patient_event_id: Number(selectedPatientEventId),
+        patient_event_id: selectedPatientEventId
+          ? Number(selectedPatientEventId)
+          : null,
         question_controls: companyQuestionControls ?? null,
       };
 
@@ -7137,11 +7258,18 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
       if (createdAttemptId) {
         try {
-          await handleSendLink({
-            ...createdAttempt,
-            patient_assessment_attempt_id: createdAttemptId,
-            status: createdAttempt?.status ?? "assigned",
-          });
+          await handleSendLink(
+            {
+              ...createdAttempt,
+              patient_assessment_attempt_id: createdAttemptId,
+              status: createdAttempt?.status ?? "assigned",
+            },
+            {
+              assessmentAttemptId: createdAttemptId,
+              notes: "Initial invitation email sent",
+              emailTypeId: 1,
+            }
+          );
         } catch (sendErr) {
           console.error("Assign assessment link/email failed", sendErr);
         }
@@ -7153,6 +7281,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
       }
 
       await loadAttemptsForPatient();
+      await onAssessmentAssigned?.();
 
       setSelectedAssessmentId("");
       setSelectedPatientEventId("");
@@ -7514,7 +7643,7 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
           <button
             className="primary"
             type="button"
-            disabled={assigning || !selectedAssessmentId || !selectedPatientEventId}
+            disabled={assigning || !selectedAssessmentId}
             onClick={handleAssignAssessment}
           >
             {assigning ? "Assigning..." : `Assign to ${patientLabels.singular}`}
@@ -7603,6 +7732,19 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                     attempt?.updated_at ??
                     ""
                   );
+                  const assignedAtText = formatCompletedAtDate(
+                    attempt?.assigned_at ??
+                    attempt?.assignedAt ??
+                    attempt?.assigned_on ??
+                    attempt?.date_assigned ??
+                    attempt?.started_at ??
+                    attempt?.startedAt ??
+                    attempt?.created_at ??
+                    attempt?.createdAt ??
+                    attempt?.created_on ??
+                    attempt?.created_date ??
+                    ""
+                  );
                   const tokenExpirationText = formatTokenExpirationDate(
                     tokenExpirationByAttemptId[Number(attemptId)] ??
                     getAttemptTokenExpiration(attempt)
@@ -7640,6 +7782,17 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               disabled={isRefreshingCard}
                             >
                               <RefreshCw className={isRefreshingCard ? "spin" : ""} strokeWidth={1.5} />
+                            </button>
+                          )}
+                          {attemptId && (
+                            <button
+                              type="button"
+                              className="assessment-card-header-icon-btn"
+                              title="View email history"
+                              aria-label="View email history"
+                              onClick={() => handleOpenEmailHistory(attempt)}
+                            >
+                              <Mail strokeWidth={1.5} />
                             </button>
                           )}
                           {userTypeId === 3 && attemptId && (
@@ -7708,34 +7861,41 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                               {classificationLabel}
                             </span>
                           )}
-                          {isCompleted && completedAtText && (
-                            <span
-                              className="assessment-completed-date"
-                              style={{ fontWeight: 400, color: "#cbd5e1" }}
-                            >
-                              <span style={{ color: "#7dd3fc" }}>Date:</span>{" "}
-                              {completedAtText}
-                            </span>
-                          )}
                           {statusKey === "in_progress" && (
                             <span className="assessment-progress-inline">
                               <progress value={progressValue} max={progressMax} />
-                              <span className="assessment-progress-text">
+                              <button
+                                type="button"
+                                className="assessment-progress-link"
+                                onClick={() => handleOpenCurrentQuestion(attempt)}
+                              >
                                 {progressPercent}% Completed
-                              </span>
+                              </button>
                             </span>
                           )}
-                          {(statusKey === "in_progress" || statusKey === "assigned") && tokenExpirationText && (
-                            <span className="assessment-token-expiration">
-                              <strong>Link Expires On:</strong> {tokenExpirationText}
+                          {(assignedAtText || tokenExpirationText || (isCompleted && completedAtText)) && (
+                            <span className="assessment-card-dates">
+                              {assignedAtText && (
+                                <span className="assessment-card-date-row">
+                                  <strong>Assigned:</strong>
+                                  <span className="assessment-card-date-value">{assignedAtText}</span>
+                                </span>
+                              )}
+                              {tokenExpirationText && (
+                                <span className="assessment-card-date-row">
+                                  <strong>Link Expires:</strong>
+                                  <span className="assessment-card-date-value">{tokenExpirationText}</span>
+                                </span>
+                              )}
+                              {isCompleted && completedAtText && (
+                                <span className="assessment-card-date-row">
+                                  <strong>Completed:</strong>
+                                  <span className="assessment-card-date-value">{completedAtText}</span>
+                                </span>
+                              )}
                             </span>
                           )}
                         </div>
-                        {statusKey !== "in_progress" && statusKey !== "assigned" && tokenExpirationText && (
-                          <div className="assessment-token-expiration">
-                            <strong>Link Expires On:</strong> {tokenExpirationText}
-                          </div>
-                        )}
                       </div>
 
                       <div className="assessment-card-footer">
@@ -7805,7 +7965,11 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
                                 type="button"
                                 className="assessments-action-btn"
                                 onClick={() => {
-                                  handleSendLink(attempt);
+                                  handleSendLink(attempt, {
+                                    assessmentAttemptId: getAttemptId(attempt),
+                                    notes: "Resend email",
+                                    emailTypeId: 1,
+                                  });
                                 }}
                               >
                                 Resend Email
@@ -8140,6 +8304,99 @@ const PatientAssessmentsModal = ({ patient, userTypeId, onClose }) => {
 
               <div className="modal-actions">
                 <button onClick={() => setShowAttemptLogsModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showEmailHistoryModal && (
+          <div className="modal-overlay" style={{ zIndex: 1300 }}>
+            <div className="modal modern assessment-logs-modal assessment-email-history-modal">
+              <div className="modal-header">
+                <div>
+                  <h3>Email History</h3>
+                  <div className="assessment-logs-subtitle">
+                    {`${getAssessmentName(selectedEmailHistoryAttempt)} - Attempt ${getAttemptId(selectedEmailHistoryAttempt) ?? "—"}`}
+                  </div>
+                </div>
+                <button className="icon-close" onClick={() => setShowEmailHistoryModal(false)}>✕</button>
+              </div>
+
+              <div className="assessment-logs-modal-body">
+                {emailHistoryLoading ? (
+                  <div className="people-empty">Loading email history...</div>
+                ) : emailHistoryError ? (
+                  <div className="api-debug-error">{emailHistoryError}</div>
+                ) : emailHistoryRows.length === 0 ? (
+                  <div className="people-empty">No email history found for this assessment attempt.</div>
+                ) : (
+                  <div className="assessment-logs-table-wrap">
+                    <table className="assessment-logs-table assessment-email-history-table">
+                      <thead>
+                        <tr>
+                          <th>Email Type</th>
+                          <th>Emailed To</th>
+                          <th>Date Sent</th>
+                          <th>Additional Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {emailHistoryRows.map((historyRow, index) => (
+                          <tr key={`${historyRow?.assessment_attempt ?? "attempt"}-${historyRow?.timestamp ?? "timestamp"}-${index}`}>
+                            <td className="assessment-email-history-type">
+                              {historyRow?.email_type_description || "—"}
+                            </td>
+                            <td>
+                              {renderEmailRecipients(historyRow?.sent_to || historyRow?.email_to)}
+                            </td>
+                            <td className="assessment-email-history-date">
+                              {formatCompletedAtDate(historyRow?.timestamp) || "—"}
+                            </td>
+                            <td>{historyRow?.notes || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowEmailHistoryModal(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCurrentQuestionModal && (
+          <div className="modal-overlay" style={{ zIndex: 1300 }}>
+            <div className="modal modern assessment-logs-modal assessment-current-question-modal">
+              <div className="modal-header">
+                <h3>Current Question</h3>
+                <button className="icon-close" onClick={() => setShowCurrentQuestionModal(false)}>✕</button>
+              </div>
+
+              <div className="assessment-logs-modal-body">
+                {currentQuestionLoading ? (
+                  <div className="people-empty">Loading current question...</div>
+                ) : currentQuestionError ? (
+                  <div className="api-debug-error">{currentQuestionError}</div>
+                ) : !currentQuestion ? (
+                  <div className="people-empty">No current question is available.</div>
+                ) : (
+                  <div className="assessment-current-question-content">
+                    <div className="assessment-current-question-title">
+                      {currentQuestion.title || "—"}
+                    </div>
+                    <div className="assessment-current-question-verbiage">
+                      {currentQuestion.verbiage || "—"}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowCurrentQuestionModal(false)}>Close</button>
               </div>
             </div>
           </div>

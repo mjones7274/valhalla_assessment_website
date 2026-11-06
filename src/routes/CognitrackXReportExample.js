@@ -14,7 +14,6 @@ import {
   FaRegCircle,
   FaShieldAlt,
   FaStethoscope,
-  FaUserMd,
 } from "react-icons/fa";
 
 const pageStyle = {
